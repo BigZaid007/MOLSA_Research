@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}{{ t('dash.title') }} — {{ t('appName') }}{% endblock %}
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+{% block content %}
+<div x-data="dashboardApp()" x-cloak>
+    <section class="mb-6">
+        <p class="page-kicker">{{ t('appName') }}</p>
+        <h1 class="page-title">{{ t('dash.title') }}</h1>
+        <p class="page-subtitle">{{ t('dash.subtitle') }}</p>
+    </section>
+
+    <div class="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div class="card stat-card">
+            <p class="stat-label">{{ t('dash.totalSearches') }}</p>
+            <p class="stat-value text-brand-700" x-text="stats.total_searches || 0">0</p>
+        </div>
+        <div class="card stat-card">
+            <p class="stat-label">{{ t('dash.resultsFound') }}</p>
+            <p class="stat-value" x-text="stats.total_results || 0">0</p>
+        </div>
+        <div class="card stat-card">
+            <p class="stat-label">{{ t('dash.duplicates') }}</p>
+            <p class="stat-value" x-text="stats.duplicates_removed || 0">0</p>
+        </div>
+        <div class="card stat-card">
+            <p class="stat-label">{{ t('dash.execTime') }}</p>
+            <p class="stat-value" x-text="stats.execution_time || '0s'">0s</p>
+        </div>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-2">
+        <section class="card p-5">
+            <h2 class="mb-4 font-semibold tracking-tight">{{ t('dash.sourceDist') }}</h2>
+            <canvas id="sourceChart" height="220"></canvas>
+            <p x-show="!hasChartData" class="text-sm text-slate-400">{{ t('dash.noChart') }}</p>
+        </section>
+        <section class="card p-5">
+            <h2 class="mb-4 font-semibold tracking-tight">{{ t('dash.recent') }}</h2>
+            <div class="space-y-3">
+                <template x-for="item in searchHistory.slice(0, 5)" :key="item.id">
+                    <div class="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-0 dark:border-slate-800">
+                        <div class="min-w-0">
+                            <p class="truncate font-medium" x-text="item.topic"></p>
+                            <p class="text-xs text-slate-400" x-text="formatDate(item.date)"></p>
+                        </div>
+                        <span class="badge"
+                              :class="item.status === 'completed' ? 'badge-official' : 'badge-muted'"
+                              x-text="item.status"></span>
+                    </div>
+                </template>
+                <p x-show="searchHistory.length === 0" class="text-sm text-slate-400">{{ t('dash.empty') }}</p>
+            </div>
+        </section>
+    </div>
+
+    <section class="card mt-6 overflow-hidden p-5">
+        <h2 class="mb-4 font-semibold tracking-tight">{{ t('dash.history') }}</h2>
+        <div class="overflow-x-auto">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>{{ t('dash.date') }}</th>
+                        <th>{{ t('dash.topic') }}</th>
+                        <th>{{ t('dash.sources') }}</th>
+                        <th>{{ t('dash.results') }}</th>
+                        <th>{{ t('dash.status') }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="history in searchHistory" :key="history.id">
+                        <tr>
+                            <td class="whitespace-nowrap" x-text="formatDate(history.date)"></td>
+                            <td x-text="history.topic"></td>
+                            <td>
+                                <span class="badge badge-muted" x-text="(history.sources || []).join(', ')"></span>
+                            </td>
+                            <td x-text="history.results_count"></td>
+                            <td>
+                                <span class="badge"
+                                      :class="history.status === 'completed' ? 'badge-official' : 'badge-muted'"
+                                      x-text="history.status"></span>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+        <p x-show="searchHistory.length === 0" class="mt-4 text-sm text-slate-400">{{ t('dash.empty') }}</p>
+    </section>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+function dashboardApp() {
+    return {
+        stats: {},
+        searchHistory: [],
+        hasChartData: false,
+        async init() {
+            await this.loadDashboardData();
+            this.initCharts();
+        },
+        async loadDashboardData() {
+            try {
+                const statsResponse = await fetch('/api/dashboard/stats');
+                this.stats = await statsResponse.json();
+                const historyResponse = await fetch('/api/dashboard/history');
+                this.searchHistory = await historyResponse.json();
+            } catch (error) {
+                console.error(error);
+            }
+        },
+        initCharts() {
+            const counts = {};
+            this.searchHistory.forEach((item) => {
+                (item.sources || []).forEach((source) => {
+                    counts[source] = (counts[source] || 0) + 1;
+                });
+            });
+            const labels = Object.keys(counts);
+            const values = Object.values(counts);
+            this.hasChartData = labels.length > 0;
+            const canvas = document.getElementById('sourceChart');
+            if (!canvas || !this.hasChartData) return;
+            new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: ['#0f766e', '#0369a1', '#b45309', '#be123c', '#7c3aed', '#0f172a', '#0d9488', '#334155']
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+        },
+        formatDate(dateString) {
+            return dateString ? new Date(dateString).toLocaleString() : '';
+        }
+    };
+}
+</script>
+{% endblock %}

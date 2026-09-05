@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}{{ t('settings.title') }} — {{ t('appName') }}{% endblock %}
+{% block content %}
+<div x-data="settingsApp()" x-cloak>
+    <section class="mb-6">
+        <p class="page-kicker">{{ t('appName') }}</p>
+        <h1 class="page-title">{{ t('settings.title') }}</h1>
+        <p class="page-subtitle">{{ t('auth.signedInAs') }} <strong>{{ user.display_name if user else '' }}</strong></p>
+    </section>
+
+    <div class="grid gap-6 lg:grid-cols-3">
+        <nav class="card h-fit p-2">
+            <button type="button" @click="activeSection = 'general'" class="nav-link w-full justify-start" :class="activeSection === 'general' && 'is-active'">{{ t('settings.general') }}</button>
+            <button type="button" @click="activeSection = 'sources'" class="nav-link w-full justify-start" :class="activeSection === 'sources' && 'is-active'">{{ t('settings.sources') }}</button>
+            <button type="button" @click="activeSection = 'performance'" class="nav-link w-full justify-start" :class="activeSection === 'performance' && 'is-active'">{{ t('settings.performance') }}</button>
+            <button type="button" @click="activeSection = 'language'" class="nav-link w-full justify-start" :class="activeSection === 'language' && 'is-active'">{{ t('settings.appearance') }}</button>
+        </nav>
+
+        <section class="card p-6 lg:col-span-2">
+            <div x-show="activeSection === 'general'" class="space-y-4">
+                <h2 class="text-lg font-semibold tracking-tight">{{ t('settings.general') }}</h2>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.maxPages') }}</label>
+                    <input type="number" x-model="settings.max_pages" min="1" max="100" class="field">
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.timeout') }}</label>
+                    <input type="number" x-model="settings.request_timeout" min="5" max="120" class="field">
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.concurrent') }}</label>
+                    <input type="number" x-model="settings.max_concurrent_requests" min="1" max="50" class="field">
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.autoSave') }}</label>
+                    <select x-model="settings.auto_save" class="field">
+                        <option value="true">{{ t('settings.yes') }}</option>
+                        <option value="false">{{ t('settings.no') }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div x-show="activeSection === 'sources'" class="space-y-3">
+                <h2 class="text-lg font-semibold tracking-tight">{{ t('settings.sources') }}</h2>
+                <template x-for="item in sourceItems" :key="item.key">
+                    <label class="flex items-center justify-between rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+                        <span>
+                            <span class="block font-medium" x-text="item.label"></span>
+                            <span class="block text-sm text-slate-400" x-text="item.hint"></span>
+                        </span>
+                        <input type="checkbox" class="rounded border-slate-300 text-brand-700" x-model="settings.sources[item.key]">
+                    </label>
+                </template>
+            </div>
+
+            <div x-show="activeSection === 'performance'" class="space-y-4">
+                <h2 class="text-lg font-semibold tracking-tight">{{ t('settings.performance') }}</h2>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.connTimeout') }}</label>
+                    <input type="number" x-model="settings.timeout" min="5" max="60" step="5" class="field">
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.retries') }}</label>
+                    <input type="number" x-model="settings.max_retries" min="0" max="5" class="field">
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.rateLimit') }}</label>
+                    <select x-model="settings.rate_limiting.enabled" class="field">
+                        <option value="true">{{ t('settings.yes') }}</option>
+                        <option value="false">{{ t('settings.no') }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div x-show="activeSection === 'language'" class="space-y-4">
+                <h2 class="text-lg font-semibold tracking-tight">{{ t('settings.appearance') }}</h2>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.interfaceLang') }}</label>
+                    <select x-model="settings.language" class="field">
+                        <option value="en">{{ t('english') }}</option>
+                        <option value="ar">{{ t('arabic') }}</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('settings.theme') }}</label>
+                    <select x-model="settings.theme" class="field">
+                        <option value="light">{{ t('settings.themeLight') }}</option>
+                        <option value="dark">{{ t('settings.themeDark') }}</option>
+                        <option value="auto">{{ t('settings.themeAuto') }}</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end">
+                <button type="button" @click="saveSettings()" class="btn-primary rounded-xl px-5 py-2.5 text-sm font-semibold">{{ t('settings.save') }}</button>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+function settingsApp() {
+    return {
+        activeSection: 'general',
+        settings: {
+            max_pages: 10,
+            request_timeout: 30,
+            max_concurrent_requests: 20,
+            auto_save: 'true',
+            sources: {
+                google: true, bing: true, rss: true, news: true, reddit: true,
+                facebook: true, instagram: true, linkedin: true, x: true, tiktok: true, telegram: true
+            },
+            timeout: 30,
+            max_retries: 3,
+            rate_limiting: { enabled: 'true' },
+            language: '{{ lang }}',
+            theme: '{{ theme }}'
+        },
+        sourceItems: [
+            { key: 'google', label: 'Google', hint: I18N.settings.sourceGoogle },
+            { key: 'bing', label: 'Bing', hint: I18N.settings.sourceBing },
+            { key: 'news', label: 'News', hint: I18N.settings.sourceNews },
+            { key: 'rss', label: 'RSS', hint: I18N.settings.sourceRss },
+            { key: 'reddit', label: 'Reddit', hint: I18N.settings.sourceReddit },
+            { key: 'facebook', label: 'Facebook', hint: I18N.settings.sourceFacebook },
+            { key: 'instagram', label: 'Instagram', hint: I18N.settings.sourceInstagram },
+            { key: 'linkedin', label: 'LinkedIn', hint: I18N.settings.sourceLinkedin },
+            { key: 'x', label: 'X', hint: I18N.settings.sourceX },
+            { key: 'tiktok', label: 'TikTok', hint: I18N.settings.sourceTiktok },
+            { key: 'telegram', label: 'Telegram', hint: I18N.settings.sourceTelegram },
+        ],
+        async init() {
+            try {
+                const response = await fetch('/api/settings');
+                if (!response.ok) return;
+                const saved = await response.json();
+                this.settings = { ...this.settings, ...saved };
+                if (!this.settings.sources) this.settings.sources = {};
+                if (!this.settings.rate_limiting) this.settings.rate_limiting = { enabled: 'true' };
+            } catch (error) {
+                console.error(error);
+            }
+        },
+        applyTheme(theme) {
+            const dark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            document.documentElement.classList.toggle('dark', dark);
+        },
+        async saveSettings() {
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.settings)
+                });
+                if (!response.ok) throw new Error('save');
+                this.applyTheme(this.settings.theme);
+                this.showNotification(I18N.settings.saved, 'success');
+                if (this.settings.language && this.settings.language !== '{{ lang }}') {
+                    window.location.href = '/set-lang?lang=' + this.settings.language + '&next=/settings';
+                }
+            } catch (error) {
+                this.showNotification(I18N.settings.saveError, 'error');
+            }
+        },
+        showNotification(message, type) {
+            const colors = { success: 'bg-emerald-600', error: 'bg-red-600' };
+            const notification = document.createElement('div');
+            notification.className = 'fixed bottom-4 z-50 rounded-lg px-4 py-3 text-sm text-white ' + colors[type];
+            notification.style[document.documentElement.dir === 'rtl' ? 'left' : 'right'] = '1rem';
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.remove(), 2500);
+        }
+    };
+}
+</script>
+{% endblock %}

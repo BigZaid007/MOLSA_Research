@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ t('auth.usersTitle') }} — {{ t('appName') }}{% endblock %}
+{% block content %}
+<div x-data="usersApp()" class="space-y-6">
+    <section>
+        <p class="page-kicker">{{ t('appName') }}</p>
+        <h1 class="page-title">{{ t('auth.usersTitle') }}</h1>
+        <p class="page-subtitle">{{ t('auth.usersSubtitle') }}</p>
+        <p x-show="notice" x-text="notice" class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800"></p>
+    </section>
+
+    <div class="grid gap-6 lg:grid-cols-3">
+        <section class="card p-5 lg:col-span-2">
+            <div class="overflow-x-auto">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>{{ t('auth.username') }}</th>
+                            <th>{{ t('auth.displayName') }}</th>
+                            <th>{{ t('auth.role') }}</th>
+                            <th>{{ t('auth.lastLogin') }}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="person in people" :key="person.id">
+                            <tr>
+                                <td class="font-medium" x-text="person.username"></td>
+                                <td x-text="person.display_name"></td>
+                                <td>
+                                    <span class="badge"
+                                          :class="person.role === 'admin' ? 'badge-official' : 'badge-muted'"
+                                          x-text="person.role === 'admin' ? I18N.auth.roleAdmin : I18N.auth.roleUser"></span>
+                                </td>
+                                <td class="text-slate-500" x-text="formatDate(person.last_login)"></td>
+                                <td class="text-end">
+                                    <button type="button" class="text-red-600 hover:underline disabled:text-slate-300"
+                                            :disabled="person.id === currentUserId"
+                                            @click="removeUser(person.id)"
+                                            x-text="I18N.auth.delete"></button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <p class="mt-3 text-xs text-slate-400" x-text="people.length + ' / 10'"></p>
+        </section>
+
+        <section class="card p-5">
+            <h2 class="font-semibold tracking-tight">{{ t('auth.addUser') }}</h2>
+            <form class="mt-4 space-y-3" @submit.prevent="createUser">
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('auth.username') }}</label>
+                    <input x-model="form.username" required minlength="2" class="field">
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('auth.displayName') }}</label>
+                    <input x-model="form.display_name" class="field">
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('auth.password') }}</label>
+                    <input type="password" x-model="form.password" required minlength="6" class="field">
+                </div>
+                <div>
+                    <label class="mb-1 block text-sm">{{ t('auth.role') }}</label>
+                    <select x-model="form.role" class="field">
+                        <option value="user">{{ t('auth.roleUser') }}</option>
+                        <option value="admin">{{ t('auth.roleAdmin') }}</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-primary w-full rounded-xl py-2.5 text-sm font-semibold">{{ t('auth.createUser') }}</button>
+            </form>
+        </section>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+function usersApp() {
+    return {
+        people: {{ users | tojson }},
+        currentUserId: {{ user.id | tojson }},
+        form: { username: '', display_name: '', password: '', role: 'user' },
+        notice: '',
+        async createUser() {
+            this.notice = '';
+            const response = await fetch('/api/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.form)
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                this.notice = data.detail || I18N.auth.usernameTaken;
+                return;
+            }
+            this.people.push(data);
+            this.form = { username: '', display_name: '', password: '', role: 'user' };
+            this.notice = I18N.auth.userCreated;
+        },
+        async removeUser(id) {
+            this.notice = '';
+            const response = await fetch('/api/users/' + id, { method: 'DELETE' });
+            if (!response.ok) {
+                const data = await response.json();
+                this.notice = data.detail || I18N.auth.cannotDeleteSelf;
+                return;
+            }
+            this.people = this.people.filter((person) => person.id !== id);
+        },
+        formatDate(value) {
+            return value ? new Date(value).toLocaleString() : '—';
+        }
+    };
+}
+</script>
+{% endblock %}

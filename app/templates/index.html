@@ -1,0 +1,444 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.search') }} — {{ t('appName') }}{% endblock %}
+{% block content %}
+<div x-data="app()" x-cloak>
+    <section class="mb-6">
+        <p class="page-kicker">{{ t('appName') }}</p>
+        <h1 class="page-title">{{ t('home.title') }}</h1>
+        <p class="page-subtitle">{{ t('home.subtitle') }}</p>
+    </section>
+
+    <section class="card search-shell">
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="chip" @click="setTab('websites')" :class="searchTab === 'websites' && 'is-active'">
+                    {{ t('home.tabWebsites') }}
+                </button>
+                <button type="button" class="chip" @click="setTab('social')" :class="searchTab === 'social' && 'is-active'">
+                    {{ t('home.tabSocial') }}
+                </button>
+            </div>
+            <p class="text-xs text-slate-400" x-text="searchTab === 'social' ? I18N.home.tabSocialHint : I18N.home.tabWebHint"></p>
+        </div>
+
+        <form @submit.prevent="search">
+            <div class="search-bar">
+                <input type="text" x-model="topic" :placeholder="I18N.home.topicPlaceholder" dir="auto" autofocus>
+                <button type="submit" class="btn-primary shrink-0 rounded-xl px-5 text-sm font-semibold">
+                    {{ t('home.startResearch') }}
+                </button>
+            </div>
+        </form>
+
+        <div class="mt-4">
+            <div class="mb-2 flex items-center justify-between gap-3">
+                <p class="text-xs text-slate-400">{{ t('home.presetsHint') }}</p>
+                <button type="button" class="text-xs font-medium text-slate-400 hover:text-brand-700"
+                    x-show="selectedChips.length"
+                    @click="clearPresets()">{{ t('home.clearPresets') }}</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <template x-for="preset in presets" :key="preset.query">
+                    <button type="button" @click="togglePreset(preset)"
+                        class="chip"
+                        :class="isChipOn(preset) && 'is-active'"
+                        x-text="preset.label"></button>
+                </template>
+            </div>
+        </div>
+
+        <div class="mt-5">
+            <div class="mb-2 flex items-center justify-between gap-3">
+                <p class="text-xs text-slate-400">{{ t('home.provinceHint') }}</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="chip" :class="!province && 'is-active'" @click="province = ''">
+                    {{ t('home.provinceAll') }}
+                </button>
+                <template x-for="item in provinces" :key="item.id">
+                    <button type="button" class="chip" :class="province === item.id && 'is-active'"
+                        @click="province = (province === item.id ? '' : item.id)"
+                        x-text="item.label"></button>
+                </template>
+            </div>
+        </div>
+
+        <div class="mt-4">
+            <button type="button" class="btn-ghost rounded-xl px-4 py-2 text-sm font-semibold"
+                    :class="showFilters && 'is-active'"
+                    @click="showFilters = !showFilters"
+                    x-text="showFilters ? I18N.home.hideFilters : I18N.home.filters"></button>
+        </div>
+
+        <div x-show="showFilters" x-cloak class="mt-4 grid gap-4 border-t border-slate-100 pt-4 dark:border-slate-800 md:grid-cols-2">
+            <div class="md:col-span-2">
+                <label class="mb-2 block text-sm font-medium">{{ t('home.sources') }}</label>
+                <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <template x-for="source in visibleSources" :key="source.value">
+                        <label class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-700">
+                            <input type="checkbox" class="rounded border-slate-300 text-brand-700" :value="source.value" x-model="selectedSources">
+                            <span x-text="source.label"></span>
+                        </label>
+                    </template>
+                </div>
+            </div>
+            <div>
+                <label class="mb-2 block text-sm font-medium">{{ t('home.dateRange') }}</label>
+                <div class="mb-3 flex flex-wrap gap-2">
+                    <template x-for="preset in datePresets" :key="preset.id">
+                        <button type="button" @click="applyDatePreset(preset.id)"
+                            class="chip"
+                            :class="datePreset === preset.id && 'is-active'"
+                            x-text="preset.label"></button>
+                    </template>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="mb-1 block text-xs text-slate-400">{{ t('home.from') }}</label>
+                        <input type="date" x-model="dateFrom" @change="datePreset = 'custom'" class="field">
+                    </div>
+                    <div>
+                        <label class="mb-1 block text-xs text-slate-400">{{ t('home.to') }}</label>
+                        <input type="date" x-model="dateTo" :min="dateFrom || null" @change="datePreset = 'custom'" class="field">
+                    </div>
+                </div>
+            </div>
+            <div>
+                <label class="mb-2 block text-sm font-medium">{{ t('home.maxResults') }}</label>
+                <input type="number" x-model.number="maxResults" min="1" max="50" class="field">
+            </div>
+        </div>
+    </section>
+
+    <div x-show="loading" class="card mt-4 flex items-center gap-3 px-4 py-3 text-sm">
+        <div class="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-brand-700 border-t-transparent"></div>
+        <div>
+            <p class="font-medium" x-text="loadingMessage"></p>
+            <p class="text-xs text-slate-400">{{ t('home.pleaseWait') }}</p>
+        </div>
+    </div>
+
+    <div x-show="statusMessage" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" x-text="statusMessage"></div>
+
+    <section x-show="results.length > 0" class="mt-8">
+        <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <h2 class="text-lg font-semibold tracking-tight">{{ t('home.results') }}</h2>
+                <p class="text-sm text-slate-400" x-text="I18N.home.foundN.replace('{n}', results.length)"></p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button @click="exportResults('excel')" class="btn-primary rounded-xl px-3 py-2 text-sm">{{ t('home.exportExcel') }}</button>
+                <button @click="exportResults('json')" class="btn-ghost rounded-xl px-3 py-2 text-sm">{{ t('home.exportJson') }}</button>
+                <button @click="exportResults('csv')" class="btn-ghost rounded-xl px-3 py-2 text-sm">{{ t('home.exportCsv') }}</button>
+                <button @click="exportResults('markdown')" class="btn-ghost rounded-xl px-3 py-2 text-sm">{{ t('home.exportMarkdown') }}</button>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <template x-for="result in results" :key="result.id || result.url">
+                <article class="card result-card">
+                    <div class="mb-3 flex flex-wrap items-center gap-1.5">
+                        <span class="badge badge-brand" x-text="result.platform || result.source"></span>
+                        <span x-show="result.is_official" class="badge badge-official">{{ t('home.officialSource') }}</span>
+                        <span x-show="result.post_kind && result.is_social_mention" class="badge badge-muted" x-text="result.post_kind"></span>
+                        <span x-show="!result.is_social_mention" class="badge badge-muted" x-text="result.content_type || 'article'"></span>
+                    </div>
+                    <h3 class="line-clamp-2 text-[0.98rem] font-semibold leading-6" x-text="result.title"></h3>
+                    <p class="mt-2 mb-3 line-clamp-4 text-sm leading-6 text-slate-500" dir="auto"
+                       x-text="result.excerpt || result.description"></p>
+                    <div class="mb-3 flex flex-wrap gap-1" x-show="result.keywords && result.keywords.length">
+                        <template x-for="tag in (result.keywords || []).slice(0, 5)" :key="tag">
+                            <span class="badge badge-muted" x-text="tag"></span>
+                        </template>
+                    </div>
+                    <div class="mt-auto flex items-center justify-between pt-2 text-xs text-slate-400">
+                        <span x-text="formatDate(result.published_date)"></span>
+                        <span x-text="result.author ? ('@' + result.author) : ''"></span>
+                    </div>
+                    <div class="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
+                        <a :href="result.url" target="_blank" class="text-sm font-medium text-brand-700 hover:underline">{{ t('home.openLink') }}</a>
+                        <button type="button" @click="viewDetails(result)" class="text-sm text-slate-400 hover:text-slate-700">{{ t('home.details') }}</button>
+                    </div>
+                </article>
+            </template>
+        </div>
+    </section>
+
+    <div x-show="results.length === 0 && searched && !loading" class="card empty-state mt-8">
+        <h3 class="text-lg font-semibold">{{ t('home.noResults') }}</h3>
+        <p class="mt-1 text-sm text-slate-500">{{ t('home.noResultsHint') }}</p>
+    </div>
+
+    <div x-show="detailItem" x-cloak class="modal-backdrop fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+         @keydown.escape.window="detailItem = null">
+        <div class="absolute inset-0" @click="detailItem = null"></div>
+        <article class="card relative z-10 my-4 w-full max-w-3xl p-5 sm:p-7" @click.stop>
+            <div class="mb-4 flex items-start justify-between gap-3">
+                <div>
+                    <p class="text-xs uppercase tracking-wide text-slate-400" x-text="detailItem && (detailItem.is_social_mention ? I18N.home.socialMention : I18N.home.fullArticle)"></p>
+                    <h3 class="mt-1 text-xl font-semibold" dir="auto" x-text="detailItem && detailItem.title"></h3>
+                    <p class="mt-1 text-xs text-slate-400">
+                        <span x-text="detailItem && detailItem.source"></span>
+                        <span x-show="detailItem && detailItem.published_date"> · </span>
+                        <span x-text="detailItem && formatDate(detailItem.published_date)"></span>
+                    </p>
+                </div>
+                <button type="button" @click="detailItem = null" class="btn-ghost rounded-xl px-2 py-1 text-sm">{{ t('home.closeDetails') }}</button>
+            </div>
+            <div class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-slate-700 dark:text-slate-200" dir="auto"
+                 x-text="detailItem && (detailItem.content || detailItem.excerpt || detailItem.description)"></div>
+            <div class="mt-5 flex justify-end">
+                <a :href="detailItem && detailItem.url" target="_blank" class="text-sm font-medium text-brand-700 hover:underline">{{ t('home.openLink') }}</a>
+            </div>
+        </article>
+    </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+function app() {
+    const socialSourceValues = ['facebook', 'instagram', 'linkedin', 'x', 'tiktok', 'reddit', 'telegram'];
+    const webSourceValues = ['google', 'bing', 'rss', 'news'];
+
+    return {
+        searchTab: 'websites',
+        topic: '',
+        selectedChips: [],
+        province: '',
+        showFilters: false,
+        presets: [
+            { label: I18N.home.presetMinistry, query: 'وزارة العمل العراقية' },
+            { label: I18N.home.presetMinister, query: 'وزير العمل العراقي' },
+            { label: I18N.home.presetDecisions, query: 'قرارات وزارة العمل العراقية' },
+            { label: I18N.home.presetSocialAffairs, query: 'وزارة العمل والشؤون الاجتماعية' },
+            { label: I18N.home.presetMolsa, query: 'MOLSA Iraq' },
+            { label: I18N.home.presetProtection, query: 'الحماية الاجتماعية وزارة العمل العراقية' },
+            { label: I18N.home.presetSecurity, query: 'الضمان الاجتماعي وزارة العمل العراقية' },
+            { label: I18N.home.presetPensions, query: 'التقاعد وزارة العمل العراقية' },
+            { label: I18N.home.presetDisability, query: 'ذوو الإعاقة وزارة العمل العراقية' },
+            { label: I18N.home.presetInspection, query: 'التفتيش العمالي وزارة العمل العراقية' },
+            { label: I18N.home.presetTraining, query: 'التدريب المهني وزارة العمل العراقية' },
+            { label: I18N.home.presetLoans, query: 'قروض ودعم وزارة العمل العراقية' },
+            { label: I18N.home.presetWelfare, query: 'إعانات الحماية الاجتماعية العراق' },
+            { label: I18N.home.presetEmployment, query: 'التشغيل والتعيين وزارة العمل العراقية' },
+            { label: I18N.home.presetSafety, query: 'السلامة المهنية وزارة العمل العراقية' },
+            { label: I18N.home.presetDecentWork, query: 'العمل اللائق وزارة العمل العراقية' },
+            { label: I18N.home.presetWomen, query: 'تمكين المرأة وزارة العمل العراقية' },
+            { label: I18N.home.presetLabourLaw, query: 'قانون العمل العراقي وزارة العمل' },
+            { label: I18N.home.presetEservices, query: 'الخدمات الإلكترونية وزارة العمل العراقية' },
+        ],
+        provinces: [
+            'baghdad', 'basra', 'nineveh', 'erbil', 'sulaymaniyah', 'duhok', 'kirkuk',
+            'anbar', 'najaf', 'karbala', 'babil', 'wasit', 'diyala', 'maysan',
+            'muthanna', 'dhiqar', 'qadisiyyah', 'saladin', 'halabja',
+        ].map((id) => ({ id, label: (I18N.home.provinces && I18N.home.provinces[id]) || id })),
+        socialSources: [
+            { value: 'facebook', label: 'Facebook' },
+            { value: 'instagram', label: 'Instagram' },
+            { value: 'linkedin', label: 'LinkedIn' },
+            { value: 'x', label: 'X' },
+            { value: 'tiktok', label: 'TikTok' },
+            { value: 'reddit', label: 'Reddit' },
+            { value: 'telegram', label: 'Telegram' },
+        ],
+        webSources: [
+            { value: 'google', label: 'Google' },
+            { value: 'bing', label: 'Bing' },
+            { value: 'news', label: 'News' },
+            { value: 'rss', label: 'RSS' },
+        ],
+        selectedSources: [...webSourceValues],
+        dateFrom: '',
+        dateTo: '',
+        datePreset: 'any',
+        datePresets: [
+            { id: 'any', label: I18N.home.anyTime },
+            { id: '7', label: I18N.home.last7 },
+            { id: '30', label: I18N.home.last30 },
+            { id: '90', label: I18N.home.last90 },
+            { id: 'custom', label: I18N.home.custom },
+        ],
+        maxResults: 10,
+        results: [],
+        loading: false,
+        searched: false,
+        loadingMessage: I18N.home.searching,
+        statusMessage: '',
+
+        get visibleSources() {
+            return this.searchTab === 'social' ? this.socialSources : this.webSources;
+        },
+        setTab(tab) {
+            if (this.searchTab === tab) return;
+            this.searchTab = tab;
+            this.selectedSources = tab === 'social' ? [...socialSourceValues] : [...webSourceValues];
+            this.results = [];
+            this.searched = false;
+            this.statusMessage = '';
+            this.detailItem = null;
+        },
+        isChipOn(preset) {
+            return this.selectedChips.includes(preset.query);
+        },
+        joinParts(parts) {
+            return parts.filter(Boolean).join(', ');
+        },
+        freeText() {
+            let text = this.topic || '';
+            this.selectedChips.forEach((query) => {
+                text = text.split(query).join(',');
+            });
+            return text.replace(/\s*,\s*/g, ',').replace(/,+/g, ',').replace(/^,|,$/g, '').replace(/\s+/g, ' ').trim();
+        },
+        composeTopic() {
+            return this.joinParts([this.freeText(), ...this.selectedChips]);
+        },
+        togglePreset(preset) {
+            const extra = this.freeText();
+            const index = this.selectedChips.indexOf(preset.query);
+            if (index >= 0) this.selectedChips.splice(index, 1);
+            else this.selectedChips.push(preset.query);
+            this.topic = this.joinParts([extra, ...this.selectedChips]);
+        },
+        clearPresets() {
+            const extra = this.freeText();
+            this.selectedChips = [];
+            this.topic = extra;
+        },
+        applyDatePreset(id) {
+            this.datePreset = id;
+            if (id === 'any') { this.dateFrom = ''; this.dateTo = ''; return; }
+            if (id === 'custom') return;
+            const to = new Date();
+            const from = new Date();
+            from.setDate(to.getDate() - (Number(id) - 1));
+            this.dateTo = to.toISOString().slice(0, 10);
+            this.dateFrom = from.toISOString().slice(0, 10);
+        },
+        async search() {
+            this.topic = this.composeTopic();
+            if (!this.topic.trim()) return this.showNotification(I18N.home.enterTopic, 'warning');
+            if (this.selectedSources.length === 0) return this.showNotification(I18N.home.selectSource, 'warning');
+            if (this.dateFrom && this.dateTo && this.dateFrom > this.dateTo) {
+                return this.showNotification(I18N.home.dateOrder, 'warning');
+            }
+            this.loading = true;
+            this.searched = true;
+            this.loadingMessage = I18N.home.searching;
+            this.statusMessage = '';
+            this.results = [];
+            this.detailItem = null;
+            try {
+                const response = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        topic: this.topic,
+                        sources: this.selectedSources,
+                        max_results: this.maxResults,
+                        content_type: this.searchTab === 'social' ? 'social' : 'news',
+                        date_from: this.dateFrom || null,
+                        date_to: this.dateTo || null,
+                        province: this.province || null,
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || I18N.home.searchError);
+                if (data.task_id) {
+                    this.loadingMessage = I18N.home.processing;
+                    await this.pollResults(data.task_id);
+                }
+            } catch (error) {
+                this.showNotification(I18N.home.searchError + ' ' + error.message, 'error');
+                this.loading = false;
+            }
+        },
+        finishPoll(data) {
+            this.results = data.results || this.results || [];
+            this.loading = false;
+            this.statusMessage = data.message || '';
+            if (data.status === 'error') {
+                this.showNotification(data.error || I18N.home.searchError, 'error');
+            } else if (this.results.length > 0) {
+                this.showNotification(I18N.home.foundN.replace('{n}', this.results.length), 'success');
+            } else {
+                this.statusMessage = this.statusMessage || I18N.home.noResultsRange;
+                this.showNotification(I18N.home.noResults, 'info');
+            }
+        },
+        async pollResults(taskId) {
+            let attempts = 0;
+            const poll = async () => {
+                attempts += 1;
+                try {
+                    const response = await fetch('/api/results/' + taskId);
+                    const data = await response.json();
+                    if (data.results && data.results.length) {
+                        this.results = data.results;
+                    }
+                    if (data.status === 'completed' || data.status === 'error') {
+                        this.finishPoll(data);
+                    } else if (attempts < 55) {
+                        this.loadingMessage = I18N.home.processing;
+                        setTimeout(poll, 1200);
+                    } else {
+                        this.finishPoll({
+                            status: this.results.length ? 'completed' : 'error',
+                            results: this.results,
+                            message: this.results.length ? '' : I18N.home.timeout,
+                            error: this.results.length ? '' : I18N.home.timeout,
+                        });
+                    }
+                } catch (error) {
+                    this.showNotification(I18N.home.pollError, 'error');
+                    this.loading = false;
+                }
+            };
+            poll();
+        },
+        async exportResults(format) {
+            if (this.results.length === 0) return this.showNotification(I18N.home.exportNone, 'warning');
+            try {
+                const response = await fetch('/api/export/' + format, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        results: this.results,
+                        topic: this.topic,
+                        tab: this.searchTab,
+                        content_type: this.searchTab === 'social' ? 'social' : 'news',
+                    })
+                });
+                if (!response.ok) throw new Error('export');
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = (format === 'excel' ? ('research_' + this.searchTab + '_') : 'research_results_')
+                    + Date.now() + '.' + (format === 'excel' ? 'xlsx' : format);
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.URL.revokeObjectURL(url);
+                this.showNotification(I18N.home.exported.replace('{format}', format.toUpperCase()), 'success');
+            } catch (error) {
+                this.showNotification(I18N.home.searchError, 'error');
+            }
+        },
+        detailItem: null,
+        viewDetails(result) { this.detailItem = result; },
+        showNotification(message, type = 'info') {
+            const colors = { success: 'bg-emerald-600', error: 'bg-red-600', warning: 'bg-amber-500', info: 'bg-slate-700' };
+            const notification = document.createElement('div');
+            notification.className = 'fixed bottom-4 z-50 rounded-xl px-4 py-3 text-sm text-white shadow-lg ' + colors[type];
+            notification.style[document.documentElement.dir === 'rtl' ? 'left' : 'right'] = '1rem';
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.remove(), 3000);
+        },
+        formatDate(dateString) {
+            return dateString ? new Date(dateString).toLocaleDateString() : '';
+        }
+    };
+}
+</script>
+{% endblock %}

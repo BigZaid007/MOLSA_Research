@@ -1,0 +1,42 @@
+fastapi
+pydantic
+uvicorn
+jinja2
+python-multipart
+playwright
+beautifulsoup4
+lxml
+httpx
+aiohttp
+pandas
+python-dateutil
+trafilatura
+newspaper4k
+readability-lxml
+requests
+feedparser
+python-dotenv
+pyyaml
+bcrypt
+itsdangerous
+clerk-backend-api
+ddgs
+openpyxl
+instagrapi
+praw
+# Optional: better Reddit thread search when REDDIT_CLIENT_ID/SECRET are set
+# praw
+
+# Dev / test
+pytest
+pytest-asyncio
+pytest-cov
+pytest-mock
+black
+isort
+ruff
+mypy
+
+# Optional AI integration
+openai
+ollama

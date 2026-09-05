@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ text_dir }}" {% if theme == 'dark' %}class="dark"{% endif %}>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ t('auth.loginTitle') }} — {{ t('appName') }}</title>
+    <script>
+        window.CLERK_PUBLISHABLE_KEY = {{ clerk_publishable_key | tojson }};
+        window.CLERK_FRONTEND_HOST = {{ clerk_frontend_host | tojson }};
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Noto Sans Arabic', 'Noto Sans', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+                    colors: { brand: { 600: '#0d9488', 700: '#0f766e', 800: '#115e59' } }
+                }
+            }
+        };
+    </script>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="stylesheet" href="/static/app.css?v=3">
+</head>
+<body class="min-h-screen bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-100" data-clerk-page="sign-in">
+    <div class="login-hero relative h-36 overflow-hidden lg:hidden">
+        <div class="login-hero-pixels" aria-hidden="true"></div>
+        <div class="relative z-10 flex h-full items-end px-5 pb-4 text-white">
+            <div class="flex items-center gap-2">
+                <img src="/static/molsa-logo.png" alt="MOLSA" class="brand-logo">
+                <span>
+                    <span class="block font-semibold">{{ t('appName') }}</span>
+                    <span class="block text-[11px] text-teal-100/80">{{ t('brand.molsa') }}</span>
+                </span>
+            </div>
+        </div>
+    </div>
+    <div class="grid min-h-[calc(100vh-9rem)] lg:min-h-screen lg:grid-cols-2">
+        <aside class="login-hero relative hidden overflow-hidden bg-brand-800 px-10 py-12 text-white lg:flex lg:flex-col lg:justify-between">
+            <div class="login-hero-pixels" aria-hidden="true"></div>
+            <div class="relative z-10">
+                <div class="flex items-center gap-3">
+                    <img src="/static/molsa-logo.png" alt="MOLSA" class="brand-logo">
+                    <span>
+                        <span class="block text-lg font-semibold">{{ t('appName') }}</span>
+                        <span class="block text-xs text-teal-100/80">{{ t('brand.molsa') }}</span>
+                    </span>
+                </div>
+                <img src="/static/molsa-logo.png" alt="" class="brand-logo brand-logo-lg mt-14">
+                <h1 class="mt-8 max-w-md text-4xl font-semibold leading-tight">{{ t('auth.loginHero') }}</h1>
+                <p class="mt-4 max-w-md text-sm text-teal-100/90">{{ t('auth.loginHeroHint') }}</p>
+            </div>
+            <p class="relative z-10 text-xs text-teal-100/80">{{ t('auth.inviteHint') }}</p>
+        </aside>
+
+        <main class="flex items-center justify-center px-4 py-10 sm:px-8">
+            <div class="w-full max-w-md">
+                <div class="mb-8 flex items-center justify-end">
+                    <div class="lang-switch">
+                        <a href="/set-lang?lang=en&next=/sign-in" class="{% if lang == 'en' %}is-on{% endif %}">EN</a>
+                        <a href="/set-lang?lang=ar&next=/sign-in" class="{% if lang == 'ar' %}is-on{% endif %}">ع</a>
+                    </div>
+                </div>
+
+                <div class="card p-6 sm:p-8">
+                    <p class="page-kicker">{{ t('appName') }}</p>
+                    <h2 class="mt-2 text-2xl font-semibold tracking-tight">{{ t('auth.loginTitle') }}</h2>
+                    <p class="mt-2 text-sm text-slate-500">{{ t('auth.loginSubtitle') }}</p>
+
+                    <div id="login-error" hidden class="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"></div>
+
+                    <form id="app-login-form" class="mt-6 space-y-4" autocomplete="on">
+                        <div>
+                            <label for="login-username" class="mb-1 block text-sm font-medium">{{ t('auth.username') }}</label>
+                            <input id="login-username" name="username" type="text" required minlength="2" autofocus
+                                   autocomplete="username" class="field">
+                        </div>
+                        <div>
+                            <label for="login-password" class="mb-1 block text-sm font-medium">{{ t('auth.password') }}</label>
+                            <input id="login-password" name="password" type="password" required minlength="6"
+                                   autocomplete="current-password" class="field">
+                        </div>
+                        <button id="login-submit" type="submit" class="btn-primary w-full rounded-xl py-2.5 text-sm font-semibold">
+                            {{ t('auth.signIn') }}
+                        </button>
+                    </form>
+
+                    <p class="mt-5 text-center text-xs text-slate-400">{{ t('auth.inviteHint') }}</p>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script>window.I18N = {{ translations | tojson }};</script>
+    <script src="/static/clerk-auth.js"></script>
+</body>
+</html>
