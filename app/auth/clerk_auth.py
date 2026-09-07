@@ -249,6 +249,54 @@ def _clerk_user_public(raw: Any, *, treat_oldest_as_admin: bool = False, oldest_
     }
 
 
+def _clerk_user_from_raw(raw: Any) -> ClerkUser:
+    public = _clerk_user_public(raw)
+    user = ClerkUser(
+        id=public["id"],
+        display_name=public["display_name"],
+        is_admin=public["role"] == "admin",
+        username=public["username"],
+        role=public["role"],
+    )
+    if not user.is_admin:
+        user.is_admin = _bootstrap_admin(user.id)
+        user.role = "admin" if user.is_admin else "user"
+    return user
+
+
+def sign_in_with_password(username: str, password: str) -> Optional[ClerkUser]:
+    """Verify username/password with Clerk's Backend API (no browser origin required)."""
+    sdk = get_sdk()
+    if sdk is None:
+        return None
+    username = (username or "").strip().lower()
+    password = password or ""
+    if len(username) < 2 or len(password) < 6:
+        return None
+    try:
+        matches = sdk.users.list(request=GetUserListRequest(username=[username], limit=5)) or []
+    except Exception:
+        logger.exception("Clerk user lookup failed")
+        return None
+    raw = next(
+        (item for item in matches if str(getattr(item, "username", "") or "").lower() == username),
+        None,
+    )
+    if raw is None:
+        return None
+    user_id = str(getattr(raw, "id", "") or "")
+    if not user_id:
+        return None
+    try:
+        result = sdk.users.verify_password(user_id=user_id, password=password)
+    except Exception:
+        logger.info("Clerk password verification rejected for %s", username)
+        return None
+    if not getattr(result, "verified", False):
+        return None
+    return _clerk_user_from_raw(raw)
+
+
 def list_clerk_users() -> list[dict]:
     sdk = get_sdk()
     if sdk is None:

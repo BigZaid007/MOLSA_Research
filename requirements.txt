@@ -21,7 +21,11 @@ bcrypt
 itsdangerous
 clerk-backend-api
 ddgs
+model2vec
+rank-bm25
+pyarabic
 openpyxl
+python-docx
 instagrapi
 praw
 # Optional: better Reddit thread search when REDDIT_CLIENT_ID/SECRET are set

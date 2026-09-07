@@ -152,19 +152,16 @@
     }
 
     async function signInWithPassword(username, password) {
-        const client = Clerk.client;
-        if (!client || !client.signIn) {
-            throw new Error(t("auth.clerkLoadError", "Could not load sign-in."));
-        }
-        const attempt = await client.signIn.create({
-            identifier: username,
-            password: password,
+        const response = await originalFetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ username: username, password: password }),
         });
-        if (attempt.status === "complete" && attempt.createdSessionId) {
-            await Clerk.setActive({ session: attempt.createdSessionId });
-            return true;
+        if (!response.ok) {
+            throw new Error(t("auth.invalid", "Incorrect username or password."));
         }
-        throw new Error(t("auth.invalid", "Incorrect username or password."));
+        return true;
     }
 
     function bindLoginForm(safeNext) {
@@ -181,8 +178,6 @@
             setFormBusy(true);
             try {
                 await signInWithPassword(username.trim(), password);
-                const ok = await establishSession();
-                if (!ok) throw new Error(t("auth.invalid", "Incorrect username or password."));
                 window.location.replace(safeNext);
             } catch (error) {
                 const message = (error && (error.errors && error.errors[0] && error.errors[0].longMessage))
@@ -212,39 +207,23 @@
         const safeNext = next.startsWith("/") && next !== "/sign-in" ? next : "/";
 
         bindSignOut();
-
-        if (!window.CLERK_PUBLISHABLE_KEY) {
-            if (page === "sign-in") {
-                showFormError(t("auth.clerkLoadError", "Could not load sign-in."));
-            }
+        if (page === "sign-in") {
+            bindLoginForm(safeNext);
             revealApp();
             return;
         }
 
-        let clerk;
+        if (!window.CLERK_PUBLISHABLE_KEY) {
+            revealApp();
+            return;
+        }
+
         try {
-            clerk = await ensureClerk();
+            const clerk = await ensureClerk();
             if (clerk) {
                 await clerk.load();
             }
-        } catch (error) {
-            clerk = null;
-        }
-
-        if (!clerk) {
-            if (page === "sign-in") {
-                showFormError(t("auth.clerkLoadError", "Could not load sign-in."));
-            }
-            revealApp();
-            return;
-        }
-
-        if (page === "sign-in") {
-            if (clerk.isSignedIn) {
-                try { await clerk.signOut(); } catch (error) { /* leftover browser session */ }
-            }
-            bindLoginForm(safeNext);
-        }
+        } catch (error) { /* pages use the app cookie, not Clerk JS */ }
 
         revealApp();
     }

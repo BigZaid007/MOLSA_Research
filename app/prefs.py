@@ -13,6 +13,7 @@ ALL_SOURCES = (
     "bing",
     "rss",
     "news",
+    "agencies",
     "reddit",
     "facebook",
     "instagram",

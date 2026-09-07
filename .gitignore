@@ -1,5 +1,10 @@
 data/
 *.db
+.ssh/
+.env
+.env.*
+DEPLOY.md
+*.docx
 __pycache__/
 .pytest_cache/
 .mypy_cache/

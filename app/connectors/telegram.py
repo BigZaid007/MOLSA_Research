@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime
 
@@ -10,13 +11,11 @@ from bs4 import BeautifulSoup
 
 from models import ContentType
 from .base import DEFAULT_HEADERS
-from .ddgs_search import ddgs_text
 from .social import (
     SocialConnector,
-    classify_social_url,
     extract_hashtags,
     extract_mentions,
-    is_official_social_url,
+    is_noise_url,
 )
 
 OFFICIAL_CHANNELS = ("molsa2023",)
@@ -36,75 +35,88 @@ class TelegramConnector(SocialConnector):
         'site:t.me "وزارة العمل" العراق',
     ]
 
-    async def search(self, query: str) -> list[dict]:
+    async def search(self, query: str, timelimit: str | None = None) -> list[dict]:
         results: list[dict] = []
         seen: set[str] = set()
 
-        for channel in OFFICIAL_CHANNELS:
-            for item in await self._scrape_channel(channel, query):
-                url = item.get("url") or ""
-                if url and url not in seen:
-                    seen.add(url)
-                    results.append(item)
+        try:
+            for channel in OFFICIAL_CHANNELS:
+                for item in await self._scrape_channel(channel, query):
+                    url = item.get("url") or ""
+                    if url and url not in seen and not is_noise_url(url):
+                        seen.add(url)
+                        results.append(item)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            return results[:18]
+        except Exception as exc:
+            self.log_error("Telegram search failed", exc)
 
-        if len(results) < 8:
-            for item in await super().search(query):
+        # Official preview posts are enough. DuckDuckGo fallback only if scrape was empty.
+        if results:
+            return results[:18]
+
+        try:
+            for item in await super().search(query, timelimit=timelimit):
                 url = item.get("url") or ""
-                if not url or url in seen:
+                if not url or url in seen or is_noise_url(url):
                     continue
                 seen.add(url)
                 results.append(item)
-
-        if not results:
-            fallback = await ddgs_text(
-                f'site:t.me "{query}"',
-                source=self.name,
-                max_results=10,
-                allowed_domains=self.allowed_domains,
-                region="xa-ar",
-            )
-            for item in fallback:
-                url = item.get("url") or ""
-                if not url or url in seen:
-                    continue
-                seen.add(url)
-                item["source"] = self.name
-                item["content_type"] = ContentType.SOCIAL.value
-                item["metadata"] = {
-                    "post_kind": classify_social_url(url, "telegram"),
-                    "platform": "Telegram",
-                    "official": is_official_social_url(url),
-                }
-                results.append(item)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            return results[:18]
+        except Exception as exc:
+            self.log_error("Telegram index fallback failed", exc)
 
         return results[:18]
 
     async def _scrape_channel(self, channel: str, query: str) -> list[dict]:
         items: list[dict] = []
+        seen: set[str] = set()
+        before: str | None = None
         try:
             async with httpx.AsyncClient(
                 headers=DEFAULT_HEADERS,
                 follow_redirects=True,
-                timeout=12,
+                timeout=8,
             ) as client:
-                response = await client.get(PREVIEW.format(channel=channel))
-                if response.status_code >= 400:
-                    return []
-                soup = BeautifulSoup(response.text, "html.parser")
+                for _ in range(2):
+                    url = PREVIEW.format(channel=channel)
+                    if before:
+                        url = f"{url}?before={before}"
+                    response = await client.get(url)
+                    if response.status_code >= 400:
+                        break
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    page_items, last_post = self._parse_channel_page(soup, channel, query)
+                    added = 0
+                    for item in page_items:
+                        post_url = item.get("url") or ""
+                        if not post_url or post_url in seen:
+                            continue
+                        seen.add(post_url)
+                        items.append(item)
+                        added += 1
+                    if not last_post or last_post == before or added == 0:
+                        break
+                    before = last_post
         except Exception as exc:
             self.log_error("Telegram channel scrape failed", exc)
-            return []
+            return items
+        return items
 
+    def _parse_channel_page(self, soup, channel: str, query: str) -> tuple[list[dict], str | None]:
+        items: list[dict] = []
+        last_post: str | None = None
         needles = [part.lower() for part in re.split(r"\s+", query or "") if len(part) > 1]
         ministry = any(
             token in (query or "").lower()
             for token in ("عمل", "labour", "labor", "molsa", "وزير", "وزارة")
         )
-
         for node in soup.select(".tgme_widget_message"):
             post_id = (node.get("data-post") or "").strip()
             if not post_id:
                 continue
+            last_post = post_id
             url = f"https://t.me/{post_id}"
             text_el = node.select_one(".tgme_widget_message_text")
             text = text_el.get_text(" ", strip=True) if text_el else ""
@@ -140,10 +152,11 @@ class TelegramConnector(SocialConnector):
                         "hashtags": extract_hashtags(text),
                         "mentions": extract_mentions(text),
                         "via": "telegram_preview",
+                        "provenance": "verified",
                     },
                 }
             )
-        return items
+        return items, last_post
 
     async def fetch(self, item: dict):
         from .base import BaseConnector

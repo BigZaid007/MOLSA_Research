@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 BACKEND = "auto"
 DEFAULT_TIMEOUT = 8.0
+_DDGS_CONCURRENCY = 3
+_ddgs_sem: asyncio.Semaphore | None = None
+
+
+def _semaphore() -> asyncio.Semaphore:
+    global _ddgs_sem
+    if _ddgs_sem is None:
+        _ddgs_sem = asyncio.Semaphore(_DDGS_CONCURRENCY)
+    return _ddgs_sem
 
 _QUERY_CACHE: dict[str, tuple[list[dict], float]] = {}
 _CACHE_TTL = 3600
@@ -90,8 +99,17 @@ def _normalize_news_hit(hit: dict[str, Any], source: str) -> dict[str, Any]:
     }
 
 
-def _cache_key(source: str, query: str, max_results: int, region: str) -> str:
-    return f"{source}:{query}:{max_results}:{region}"
+def _cache_key(
+    source: str,
+    query: str,
+    max_results: int,
+    region: str,
+    timelimit: str | None,
+    backend: str = BACKEND,
+    domains: tuple[str, ...] | None = None,
+) -> str:
+    domain_part = ",".join(domains or ())
+    return f"{source}:{backend}:{query}:{max_results}:{region}:{timelimit or '-'}:{domain_part}"
 
 
 def _get_cached(key: str) -> list[dict[str, Any]] | None:
@@ -122,22 +140,51 @@ async def ddgs_text(
     timeout: float = DEFAULT_TIMEOUT,
 ) -> list[dict[str, Any]]:
     """Search the public web via ddgs (Brave backend)."""
-    try:
-        hits = await asyncio.wait_for(
-            asyncio.to_thread(
-                partial(
-                    _run_text_search,
-                    query,
-                    max_results=max_results,
-                    region=region,
-                    timelimit=timelimit,
-                    backend=backend,
+    key = _cache_key(
+        source,
+        query,
+        max_results,
+        region,
+        timelimit,
+        backend=backend,
+        domains=tuple(allowed_domains or ()),
+    )
+    cached = _get_cached(key)
+    if cached is not None:
+        return [item for item in cached if not allowed_domains or any(d in (item.get("url") or "").lower() for d in allowed_domains)]
+
+    hits: list[dict[str, Any]] = []
+    last_exc: Exception | None = None
+    async with _semaphore():
+        for attempt in range(2):
+            try:
+                hits = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        partial(
+                            _run_text_search,
+                            query,
+                            max_results=max_results,
+                            region=region,
+                            timelimit=timelimit,
+                            backend=backend,
+                        )
+                    ),
+                    timeout=timeout,
                 )
-            ),
-            timeout=timeout,
-        )
-    except Exception as exc:
-        logger.warning("ddgs text search failed for %r: %s", query, exc)
+                last_exc = None
+                break
+            except asyncio.TimeoutError as exc:
+                last_exc = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.4)
+                    continue
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.35)
+    if last_exc is not None:
+        logger.warning("ddgs text search failed for %r: %s", query, last_exc)
         return []
 
     results: list[dict[str, Any]] = []
@@ -151,6 +198,7 @@ async def ddgs_text(
             continue
         seen.add(url)
         results.append(item)
+    _set_cache(key, results)
     return results
 
 
@@ -165,22 +213,50 @@ async def ddgs_news(
     timeout: float = DEFAULT_TIMEOUT,
 ) -> list[dict[str, Any]]:
     """Search news via ddgs."""
-    try:
-        hits = await asyncio.wait_for(
-            asyncio.to_thread(
-                partial(
-                    _run_news_search,
-                    query,
-                    max_results=max_results,
-                    region=region,
-                    timelimit=timelimit,
-                    backend=backend,
+    key = _cache_key(
+        source,
+        query,
+        max_results,
+        region,
+        timelimit,
+        backend=backend,
+    )
+    cached = _get_cached(key)
+    if cached is not None:
+        return cached
+
+    hits: list[dict[str, Any]] = []
+    last_exc: Exception | None = None
+    async with _semaphore():
+        for attempt in range(2):
+            try:
+                hits = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        partial(
+                            _run_news_search,
+                            query,
+                            max_results=max_results,
+                            region=region,
+                            timelimit=timelimit,
+                            backend=backend,
+                        )
+                    ),
+                    timeout=timeout,
                 )
-            ),
-            timeout=timeout,
-        )
-    except Exception as exc:
-        logger.warning("ddgs news search failed for %r: %s", query, exc)
+                last_exc = None
+                break
+            except asyncio.TimeoutError as exc:
+                last_exc = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.4)
+                    continue
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.35)
+    if last_exc is not None:
+        logger.warning("ddgs news search failed for %r: %s", query, last_exc)
         return []
 
     results: list[dict[str, Any]] = []
@@ -192,4 +268,5 @@ async def ddgs_news(
             continue
         seen.add(url)
         results.append(item)
+    _set_cache(key, results)
     return results

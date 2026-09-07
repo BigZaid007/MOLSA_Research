@@ -9,13 +9,14 @@ class BingConnector(PublicWebSearchConnector):
     platform_label = "Bing"
     content_type = ContentType.WEBSITE
 
-    async def search(self, query: str) -> list[dict]:
+    async def search(self, query: str, timelimit: str | None = None) -> list[dict]:
         results = await ddgs_text(
             query,
             source=self.name,
             max_results=10,
             region="xa-ar",
             backend="bing",
+            timelimit=timelimit,
             timeout=12.0,
         )
         if not results:
@@ -24,6 +25,7 @@ class BingConnector(PublicWebSearchConnector):
                 source=self.name,
                 max_results=10,
                 region="wt-wt",
+                timelimit=timelimit,
                 timeout=12.0,
             )
         for item in results:

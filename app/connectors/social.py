@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from urllib.parse import urlparse
 
 from models import ContentType
+from services.focus import has_ministry_entity_phrase, title_names_other_ministry
 from services.quality import filter_social_hits, is_hard_spam
 from .base import PublicWebSearchConnector
 from .ddgs_search import ddgs_text
@@ -89,6 +89,13 @@ def is_noise_url(url: str) -> bool:
     low = (url or "").lower()
     if not low.startswith("http"):
         return True
+    parsed = urlparse(low)
+    if "t.me" in parsed.netloc or "telegram.me" in parsed.netloc:
+        parts = [part for part in parsed.path.split("/") if part]
+        if parts[:1] == ["s"] and len(parts) < 3:
+            return True
+        if "before=" in (parsed.query or ""):
+            return True
     return any(part in low for part in NOISE_URL_PARTS)
 
 
@@ -205,8 +212,10 @@ class SocialConnector(PublicWebSearchConnector):
     query_templates: list[str] = []
     allowed_domains: list[str] = []
 
-    async def search(self, query: str) -> list[dict]:
+    async def search(self, query: str, timelimit: str | None = None) -> list[dict]:
         queries = self._build_social_queries(query)[:5]
+        if not queries:
+            return []
         domains = self._domains() or None
         results: list[dict] = []
         seen: set[str] = set()
@@ -218,16 +227,14 @@ class SocialConnector(PublicWebSearchConnector):
                 max_results=8,
                 allowed_domains=domains,
                 region=region,
+                timelimit=timelimit,
                 timeout=9.0,
             )
 
-        jobs = []
-        for q in queries[:3]:
-            jobs.append(run_one(q, "xa-ar"))
-        if queries:
-            jobs.append(run_one(queries[0], "wt-wt"))
-
-        batches = await asyncio.gather(*jobs, return_exceptions=True)
+        first = await run_one(queries[0], "xa-ar")
+        batches = [first]
+        if not first and len(queries) > 1:
+            batches = [await run_one(queries[1], "xa-ar")]
         for batch in batches:
             if isinstance(batch, Exception) or not batch:
                 continue
@@ -245,6 +252,10 @@ class SocialConnector(PublicWebSearchConnector):
                     item["title"] = snippet[:120]
                     title = item["title"]
                 if is_hard_spam(title, snippet, url, kind):
+                    continue
+                if title_names_other_ministry(title):
+                    continue
+                if not has_ministry_entity_phrase(title) and not has_ministry_entity_phrase(snippet):
                     continue
                 text = f"{item.get('title', '')} {snippet}"
                 item["source"] = self.name

@@ -117,9 +117,9 @@ def _blob(title: str, snippet: str) -> str:
 
 
 def _norm(text: str) -> str:
-    text = (text or "").lower()
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+    from services.arabic import normalize_arabic
+
+    return normalize_arabic(text)
 
 
 def is_mashed_title(title: str) -> bool:

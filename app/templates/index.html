@@ -11,14 +11,20 @@
     <section class="card search-shell">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="chip" @click="setTab('all')" :class="searchTab === 'all' && 'is-active'">
+                    {{ t('home.tabAll') }}
+                </button>
                 <button type="button" class="chip" @click="setTab('websites')" :class="searchTab === 'websites' && 'is-active'">
                     {{ t('home.tabWebsites') }}
                 </button>
                 <button type="button" class="chip" @click="setTab('social')" :class="searchTab === 'social' && 'is-active'">
                     {{ t('home.tabSocial') }}
                 </button>
+                <button type="button" class="chip" @click="setTab('agencies')" :class="searchTab === 'agencies' && 'is-active'">
+                    {{ t('home.tabAgencies') }}
+                </button>
             </div>
-            <p class="text-xs text-slate-400" x-text="searchTab === 'social' ? I18N.home.tabSocialHint : I18N.home.tabWebHint"></p>
+            <p class="text-xs text-slate-400" x-text="tabHint"></p>
         </div>
 
         <form @submit.prevent="search">
@@ -47,6 +53,23 @@
             </div>
         </div>
 
+        <div class="mt-5" x-show="searchTab === 'agencies' || searchTab === 'all'">
+            <div class="mb-2 flex items-center justify-between gap-3">
+                <p class="text-xs text-slate-400">{{ t('home.agenciesHint') }}</p>
+                <button type="button" class="text-xs font-medium text-slate-400 hover:text-brand-700"
+                    x-show="selectedAgencies.length && selectedAgencies.length < agencies.length"
+                    @click="selectedAgencies = agencies.map((item) => item.id)">{{ t('home.agenciesAll') }}</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <template x-for="agency in agencies" :key="agency.id">
+                    <button type="button" class="chip"
+                        :class="selectedAgencies.includes(agency.id) && 'is-active'"
+                        @click="toggleAgency(agency.id)"
+                        x-text="agency.label"></button>
+                </template>
+            </div>
+        </div>
+
         <div class="mt-5">
             <div class="mb-2 flex items-center justify-between gap-3">
                 <p class="text-xs text-slate-400">{{ t('home.provinceHint') }}</p>
@@ -64,14 +87,20 @@
         </div>
 
         <div class="mt-4">
-            <button type="button" class="btn-ghost rounded-xl px-4 py-2 text-sm font-semibold"
+            <button type="button" class="btn-ghost inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
                     :class="showFilters && 'is-active'"
-                    @click="showFilters = !showFilters"
-                    x-text="showFilters ? I18N.home.hideFilters : I18N.home.filters"></button>
+                    :aria-expanded="showFilters"
+                    @click="showFilters = !showFilters">
+                <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M3 5h18l-6.5 7.4V19l-5-2.2v-4.4L3 5z"/>
+                </svg>
+                <span x-text="showFilters ? I18N.home.hideFilters : I18N.home.filters"></span>
+            </button>
         </div>
 
         <div x-show="showFilters" x-cloak class="mt-4 grid gap-4 border-t border-slate-100 pt-4 dark:border-slate-800 md:grid-cols-2">
-            <div class="md:col-span-2">
+            <div class="md:col-span-2" x-show="visibleSources.length">
                 <label class="mb-2 block text-sm font-medium">{{ t('home.sources') }}</label>
                 <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <template x-for="source in visibleSources" :key="source.value">
@@ -120,25 +149,27 @@
 
     <div x-show="statusMessage" class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" x-text="statusMessage"></div>
 
-    <section x-show="results.length > 0" class="mt-8">
+    <section x-show="visibleResults.length > 0" class="mt-8">
         <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
                 <h2 class="text-lg font-semibold tracking-tight">{{ t('home.results') }}</h2>
-                <p class="text-sm text-slate-400" x-text="I18N.home.foundN.replace('{n}', results.length)"></p>
+                <p class="text-sm text-slate-400" x-text="I18N.home.foundN.replace('{n}', visibleResults.length)"></p>
             </div>
             <div class="flex flex-wrap gap-2">
                 <button @click="exportResults('excel')" class="btn-primary rounded-xl px-3 py-2 text-sm">{{ t('home.exportExcel') }}</button>
-                <button @click="exportResults('json')" class="btn-ghost rounded-xl px-3 py-2 text-sm">{{ t('home.exportJson') }}</button>
                 <button @click="exportResults('csv')" class="btn-ghost rounded-xl px-3 py-2 text-sm">{{ t('home.exportCsv') }}</button>
-                <button @click="exportResults('markdown')" class="btn-ghost rounded-xl px-3 py-2 text-sm">{{ t('home.exportMarkdown') }}</button>
+                <button @click="exportResults('word')" class="btn-ghost rounded-xl px-3 py-2 text-sm">{{ t('home.exportWord') }}</button>
             </div>
         </div>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <template x-for="result in results" :key="result.id || result.url">
+            <template x-for="result in visibleResults" :key="result.id || result.url">
                 <article class="card result-card">
                     <div class="mb-3 flex flex-wrap items-center gap-1.5">
                         <span class="badge badge-brand" x-text="result.platform || result.source"></span>
                         <span x-show="result.is_official" class="badge badge-official">{{ t('home.officialSource') }}</span>
+                        <span x-show="result.provenance === 'verified' && !result.is_official" class="badge badge-official">{{ t('home.provenanceVerified') }}</span>
+                        <span x-show="result.provenance === 'indexed'" class="badge badge-muted">{{ t('home.provenanceIndexed') }}</span>
+                        <span x-show="result.is_exploratory || result.provenance === 'snippet'" class="badge badge-muted">{{ t('home.provenanceSnippet') }}</span>
                         <span x-show="result.post_kind && result.is_social_mention" class="badge badge-muted" x-text="result.post_kind"></span>
                         <span x-show="!result.is_social_mention" class="badge badge-muted" x-text="result.content_type || 'article'"></span>
                     </div>
@@ -163,7 +194,7 @@
         </div>
     </section>
 
-    <div x-show="results.length === 0 && searched && !loading" class="card empty-state mt-8">
+    <div x-show="visibleResults.length === 0 && searched && !loading" class="card empty-state mt-8">
         <h3 class="text-lg font-semibold">{{ t('home.noResults') }}</h3>
         <p class="mt-1 text-sm text-slate-500">{{ t('home.noResultsHint') }}</p>
     </div>
@@ -176,6 +207,9 @@
                 <div>
                     <p class="text-xs uppercase tracking-wide text-slate-400" x-text="detailItem && (detailItem.is_social_mention ? I18N.home.socialMention : I18N.home.fullArticle)"></p>
                     <h3 class="mt-1 text-xl font-semibold" dir="auto" x-text="detailItem && detailItem.title"></h3>
+                    <p class="mt-1 text-xs text-slate-400" x-show="detailItem && detailItem.is_exploratory">
+                        {{ t('home.provenanceSnippet') }}
+                    </p>
                     <p class="mt-1 text-xs text-slate-400">
                         <span x-text="detailItem && detailItem.source"></span>
                         <span x-show="detailItem && detailItem.published_date"> · </span>
@@ -197,10 +231,14 @@
 <script>
 function app() {
     const socialSourceValues = ['facebook', 'instagram', 'linkedin', 'x', 'tiktok', 'reddit', 'telegram'];
-    const webSourceValues = ['google', 'bing', 'rss', 'news'];
+    const exploratorySocialValues = ['facebook', 'instagram', 'linkedin', 'x', 'tiktok', 'reddit'];
+    const webSourceValues = ['rss', 'news', 'google', 'bing'];
+    const agencySourceValues = ['agencies'];
+    const defaultAllSources = [...webSourceValues, 'telegram', ...agencySourceValues];
+    const agencyOptions = {{ agency_options | tojson }};
 
     return {
-        searchTab: 'websites',
+        searchTab: 'all',
         topic: '',
         selectedChips: [],
         province: '',
@@ -241,17 +279,20 @@ function app() {
             { value: 'telegram', label: 'Telegram' },
         ],
         webSources: [
+            { value: 'rss', label: 'RSS' },
+            { value: 'news', label: 'News' },
             { value: 'google', label: 'Google' },
             { value: 'bing', label: 'Bing' },
-            { value: 'news', label: 'News' },
-            { value: 'rss', label: 'RSS' },
         ],
-        selectedSources: [...webSourceValues],
+        agencies: agencyOptions,
+        selectedAgencies: agencyOptions.map((item) => item.id),
+        selectedSources: [...defaultAllSources],
         dateFrom: '',
         dateTo: '',
-        datePreset: 'any',
+        datePreset: '1',
         datePresets: [
             { id: 'any', label: I18N.home.anyTime },
+            { id: '1', label: I18N.home.last24 },
             { id: '7', label: I18N.home.last7 },
             { id: '30', label: I18N.home.last30 },
             { id: '90', label: I18N.home.last90 },
@@ -264,30 +305,108 @@ function app() {
         loadingMessage: I18N.home.searching,
         statusMessage: '',
 
+        init() {
+            this.applyDatePreset('1');
+        },
+        combinedSources() {
+            const picked = this.selectedSources.filter(Boolean);
+            if (this.searchTab === 'all') {
+                return picked.length ? picked : [...defaultAllSources];
+            }
+            if (this.searchTab === 'social') {
+                const social = picked.filter((source) => socialSourceValues.includes(source));
+                return social.length ? social : [...socialSourceValues];
+            }
+            if (this.searchTab === 'agencies') {
+                return [...agencySourceValues];
+            }
+            const web = picked.filter((source) => webSourceValues.includes(source));
+            return web.length ? web : [...webSourceValues];
+        },
+        resultMatchesTab(item) {
+            const source = (item.source || '').toLowerCase();
+            const type = (item.content_type || '').toLowerCase();
+            const agencyId = (item.metadata && item.metadata.agency_id) || item.agency_id;
+            const social = new Set(socialSourceValues);
+            if (this.searchTab === 'social') {
+                return social.has(source) || type === 'social' || type === 'forum';
+            }
+            if (this.searchTab === 'agencies') {
+                return source === 'agencies' || Boolean(agencyId);
+            }
+            if (this.searchTab === 'websites') {
+                return !social.has(source) && source !== 'agencies' && !agencyId;
+            }
+            return true;
+        },
+        get visibleResults() {
+            const items = this.results || [];
+            if (this.searchTab === 'all') return items;
+            return items.filter((item) => this.resultMatchesTab(item));
+        },
+
         get visibleSources() {
-            return this.searchTab === 'social' ? this.socialSources : this.webSources;
+            if (this.searchTab === 'social') return this.socialSources;
+            if (this.searchTab === 'agencies') return [];
+            if (this.searchTab === 'all') {
+                return [...this.webSources, this.socialSources.find((item) => item.value === 'telegram')].filter(Boolean);
+            }
+            return this.webSources;
+        },
+        get tabHint() {
+            if (this.searchTab === 'social') return I18N.home.tabSocialHint;
+            if (this.searchTab === 'agencies') return I18N.home.tabAgenciesHint;
+            if (this.searchTab === 'all') return I18N.home.tabAllHint;
+            return I18N.home.tabWebHint;
+        },
+        contentType() {
+            if (this.searchTab === 'social') return 'social';
+            if (this.searchTab === 'agencies') return 'agencies';
+            if (this.searchTab === 'all') return 'all';
+            return 'news';
         },
         setTab(tab) {
             if (this.searchTab === tab) return;
             this.searchTab = tab;
-            this.selectedSources = tab === 'social' ? [...socialSourceValues] : [...webSourceValues];
-            this.results = [];
-            this.searched = false;
-            this.statusMessage = '';
+            if (tab === 'social') this.selectedSources = [...socialSourceValues];
+            else if (tab === 'agencies') this.selectedSources = [...agencySourceValues];
+            else if (tab === 'all') this.selectedSources = [...defaultAllSources];
+            else this.selectedSources = [...webSourceValues];
             this.detailItem = null;
+        },
+        toggleAgency(id) {
+            const index = this.selectedAgencies.indexOf(id);
+            if (index >= 0) this.selectedAgencies.splice(index, 1);
+            else this.selectedAgencies.push(id);
+            if (!this.selectedAgencies.length) {
+                this.selectedAgencies = this.agencies.map((item) => item.id);
+            }
         },
         isChipOn(preset) {
             return this.selectedChips.includes(preset.query);
         },
+        uniqueParts(parts) {
+            const seen = new Set();
+            const out = [];
+            parts.forEach((part) => {
+                const key = (part || '').trim();
+                if (key && !seen.has(key)) {
+                    seen.add(key);
+                    out.push(key);
+                }
+            });
+            return out;
+        },
         joinParts(parts) {
-            return parts.filter(Boolean).join(', ');
+            return this.uniqueParts(parts).join(', ');
         },
         freeText() {
             let text = this.topic || '';
-            this.selectedChips.forEach((query) => {
-                text = text.split(query).join(',');
+            [...this.selectedChips].sort((a, b) => b.length - a.length).forEach((query) => {
+                if (!query) return;
+                text = text.split(query).join(' ');
             });
-            return text.replace(/\s*,\s*/g, ',').replace(/,+/g, ',').replace(/^,|,$/g, '').replace(/\s+/g, ' ').trim();
+            return text.replace(/\s*,\s*/g, ' ').replace(/,+/g, ' ').replace(/\s+/g, ' ').trim();
         },
         composeTopic() {
             return this.joinParts([this.freeText(), ...this.selectedChips]);
@@ -296,7 +415,7 @@ function app() {
             const extra = this.freeText();
             const index = this.selectedChips.indexOf(preset.query);
             if (index >= 0) this.selectedChips.splice(index, 1);
-            else this.selectedChips.push(preset.query);
+            else if (!this.selectedChips.includes(preset.query)) this.selectedChips.push(preset.query);
             this.topic = this.joinParts([extra, ...this.selectedChips]);
         },
         clearPresets() {
@@ -310,7 +429,8 @@ function app() {
             if (id === 'custom') return;
             const to = new Date();
             const from = new Date();
-            from.setDate(to.getDate() - (Number(id) - 1));
+            const days = Number(id);
+            from.setDate(to.getDate() - (days <= 1 ? 1 : days - 1));
             this.dateTo = to.toISOString().slice(0, 10);
             this.dateFrom = from.toISOString().slice(0, 10);
         },
@@ -333,12 +453,13 @@ function app() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         topic: this.topic,
-                        sources: this.selectedSources,
+                        sources: this.combinedSources(),
                         max_results: this.maxResults,
-                        content_type: this.searchTab === 'social' ? 'social' : 'news',
+                        content_type: this.contentType(),
                         date_from: this.dateFrom || null,
                         date_to: this.dateTo || null,
                         province: this.province || null,
+                        agencies: this.selectedAgencies,
                     })
                 });
                 const data = await response.json();
@@ -358,8 +479,8 @@ function app() {
             this.statusMessage = data.message || '';
             if (data.status === 'error') {
                 this.showNotification(data.error || I18N.home.searchError, 'error');
-            } else if (this.results.length > 0) {
-                this.showNotification(I18N.home.foundN.replace('{n}', this.results.length), 'success');
+            } else if (this.visibleResults.length > 0) {
+                this.showNotification(I18N.home.foundN.replace('{n}', this.visibleResults.length), 'success');
             } else {
                 this.statusMessage = this.statusMessage || I18N.home.noResultsRange;
                 this.showNotification(I18N.home.noResults, 'info');
@@ -396,16 +517,16 @@ function app() {
             poll();
         },
         async exportResults(format) {
-            if (this.results.length === 0) return this.showNotification(I18N.home.exportNone, 'warning');
+            if (this.visibleResults.length === 0) return this.showNotification(I18N.home.exportNone, 'warning');
             try {
                 const response = await fetch('/api/export/' + format, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        results: this.results,
+                        results: this.visibleResults,
                         topic: this.topic,
                         tab: this.searchTab,
-                        content_type: this.searchTab === 'social' ? 'social' : 'news',
+                        content_type: this.contentType(),
                     })
                 });
                 if (!response.ok) throw new Error('export');
@@ -413,8 +534,10 @@ function app() {
                 const url = window.URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.download = (format === 'excel' ? ('research_' + this.searchTab + '_') : 'research_results_')
-                    + Date.now() + '.' + (format === 'excel' ? 'xlsx' : format);
+                const ext = format === 'excel' ? 'xlsx' : (format === 'word' ? 'docx' : 'csv');
+                const header = response.headers.get('Content-Disposition') || '';
+                const utfName = header.match(/filename\*=UTF-8''([^;]+)/);
+                link.download = utfName ? decodeURIComponent(utfName[1]) : ('رصد_الوكالات.' + ext);
                 document.body.appendChild(link);
                 link.click();
                 link.remove();

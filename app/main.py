@@ -1,6 +1,4 @@
-import csv
 import io
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -15,14 +13,22 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 
 from models import SearchRequest
-from services.processor import ResearchProcessor
-from services.export import build_excel_workbook, excel_filename, export_rows
+from services.agencies import public_agency_options
+from services.processor import ResearchProcessor, resolve_sources
+from services.semantic import warmup_semantic_ranker
+from services.export import (
+    build_csv_document,
+    build_excel_workbook,
+    build_word_document,
+    report_filename,
+)
 from config.settings import get_settings
 from i18n import load_translations, resolve_lang, make_translator, text_direction
 from auth.clerk_auth import (
     authenticate_bearer,
     authenticate_request,
     clear_session_cookie,
+    sign_in_with_password,
     create_clerk_user,
     delete_clerk_user,
     frontend_host,
@@ -50,18 +56,21 @@ PUBLIC_PATHS = {
     "/set-lang",
     "/api/health",
     "/api/session",
+    "/api/login",
     "/api/logout",
     "/logout",
     "/favicon.ico",
 }
-WEB_SOURCES = ["google", "bing", "rss", "news"]
-SOCIAL_SOURCES = ["facebook", "instagram", "linkedin", "x", "tiktok", "reddit", "telegram"]
-
 app = FastAPI(
     title="Research Data Fetcher",
     description="A local research assistant for collecting public information from multiple sources",
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+def _start_semantic_ranker():
+    warmup_semantic_ranker()
 
 app.add_middleware(
     CORSMiddleware,
@@ -121,6 +130,7 @@ def _page_context(request: Request, active_page: str = "", extra: dict | None = 
         "clerk_frontend_host": frontend_host(),
         "clerk_protect": extra.get("clerk_protect", True) if extra else True,
         "clerk_page": extra.get("clerk_page", "") if extra else "",
+        "agency_options": public_agency_options(language),
     }
     if extra:
         context.update(extra)
@@ -196,6 +206,28 @@ async def users_page(request: Request):
         "users.html",
         _page_context(request, "users", extra={"users": people}),
     )
+
+
+@app.post("/api/login")
+async def login_with_password(payload: dict):
+    user = sign_in_with_password(
+        str(payload.get("username") or ""),
+        str(payload.get("password") or ""),
+    )
+    if user is None:
+        return JSONResponse({"detail": "Incorrect username or password."}, status_code=401)
+    response = JSONResponse(
+        {
+            "status": "ok",
+            "user": {
+                "id": user.id,
+                "display_name": user.display_name,
+                "is_admin": user.is_admin,
+            },
+        }
+    )
+    set_session_cookie(response, user)
+    return response
 
 
 @app.post("/api/session")
@@ -280,12 +312,10 @@ async def api_delete_user(request: Request, user_id: str):
 @app.post("/api/search")
 async def search_topic(body: SearchRequest, background_tasks: BackgroundTasks):
     settings = get_settings()
-    content_type = (body.content_type or "news").lower()
-    if content_type == "social":
-        sources = [source for source in (body.sources or SOCIAL_SOURCES) if source in SOCIAL_SOURCES] or list(SOCIAL_SOURCES)
-    else:
-        sources = [source for source in (body.sources or WEB_SOURCES) if source in WEB_SOURCES] or list(WEB_SOURCES)
-        content_type = "news"
+    content_type = (body.content_type or "all").lower()
+    if content_type not in {"social", "agencies", "all", "news"}:
+        content_type = "all"
+    sources = resolve_sources(content_type, body.sources)
 
     task_id = await processor.process_research(
         topic=body.topic,
@@ -296,6 +326,7 @@ async def search_topic(body: SearchRequest, background_tasks: BackgroundTasks):
         date_to=body.date_to,
         content_type=content_type,
         province=body.province,
+        agencies=body.agencies,
     )
     background_tasks.add_task(processor.start_processing, task_id)
 
@@ -382,51 +413,34 @@ async def export_results(format: str, payload: dict):
     if not results:
         return JSONResponse({"error": "No results to export"}, status_code=400)
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    rows = export_rows(results)
     fmt = (format or "").lower()
+    now = datetime.now()
 
     if fmt == "excel":
-        body = build_excel_workbook(payload)
-        filename = excel_filename(payload, stamp)
+        body = build_excel_workbook(payload, now)
+        filename = report_filename(now, "xlsx")
         return StreamingResponse(
             io.BytesIO(body),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-
-    if fmt == "json":
-        body = json.dumps(results, ensure_ascii=False, indent=2, default=str).encode("utf-8")
-        return StreamingResponse(
-            io.BytesIO(body),
-            media_type="application/json",
-            headers={"Content-Disposition": f'attachment; filename="research_results_{stamp}.json"'},
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
         )
 
     if fmt == "csv":
-        buffer = io.StringIO()
-        writer = csv.DictWriter(buffer, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
-        return StreamingResponse(
-            io.BytesIO(buffer.getvalue().encode("utf-8-sig")),
-            media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="research_results_{stamp}.csv"'},
-        )
-
-    if fmt == "markdown":
-        headers = list(rows[0].keys())
-        lines = [
-            "| " + " | ".join(headers) + " |",
-            "| " + " | ".join("---" for _ in headers) + " |",
-        ]
-        for row in rows:
-            lines.append("| " + " | ".join(str(row[key]).replace("|", "/") for key in headers) + " |")
-        body = ("\n".join(lines) + "\n").encode("utf-8")
+        body = build_csv_document(payload, now)
+        filename = report_filename(now, "csv")
         return StreamingResponse(
             io.BytesIO(body),
-            media_type="text/markdown",
-            headers={"Content-Disposition": f'attachment; filename="research_results_{stamp}.md"'},
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+        )
+
+    if fmt in {"word", "docx"}:
+        body = build_word_document(payload, now)
+        filename = report_filename(now, "docx")
+        return StreamingResponse(
+            io.BytesIO(body),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
         )
 
     return JSONResponse({"error": "Unsupported export format"}, status_code=400)

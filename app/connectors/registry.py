@@ -9,6 +9,7 @@ from .facebook import FacebookConnector
 from .google import GoogleConnector
 from .instagram import InstagramConnector
 from .linkedin import LinkedInConnector
+from .agencies import AgenciesConnector
 from .news import NewsConnector
 from .reddit import RedditConnector
 from .rss import RSSConnector
@@ -21,6 +22,7 @@ CONNECTOR_FACTORIES: dict[str, Callable[[], object]] = {
     "bing": BingConnector,
     "rss": RSSConnector,
     "news": NewsConnector,
+    "agencies": AgenciesConnector,
     "reddit": RedditConnector,
     "facebook": FacebookConnector,
     "instagram": InstagramConnector,

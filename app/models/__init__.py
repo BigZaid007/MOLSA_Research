@@ -67,3 +67,4 @@ class SearchRequest(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
     province: Optional[str] = None
+    agencies: Optional[List[str]] = None

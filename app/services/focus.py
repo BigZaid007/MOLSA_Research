@@ -6,6 +6,75 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 from models import ResearchItem
+from services.arabic import any_normalized_phrase, normalize_arabic
+
+# Phrases that name the ministry/minister entity. Bare «العمل» is not enough.
+MINISTRY_ENTITY_PHRASES = (
+    "وزارة العمل",
+    "وزير العمل",
+    "molsa",
+    "ministry of labour",
+    "ministry of labor",
+    "minister of labour",
+    "minister of labor",
+)
+SEMANTIC_KEEP_MIN = 0.40
+MINISTRY_RESULT_CAP = 25
+SOCIAL_SOURCE_NAMES = {
+    "facebook",
+    "instagram",
+    "linkedin",
+    "x",
+    "tiktok",
+    "reddit",
+    "telegram",
+}
+# Titles about a different Iraqi ministry are not Labour stories, even if a
+# footer or contact block mentions MOLSA.
+OTHER_IRAQI_MINISTRIES = (
+    "وزارة النفط",
+    "وزارة التربية",
+    "وزارة التعليم العالي",
+    "وزارة الصحة",
+    "وزارة الداخلية",
+    "وزارة الدفاع",
+    "وزارة الخارجية",
+    "وزارة المالية",
+    "وزارة العدل",
+    "وزارة الكهرباء",
+    "وزارة الإعمار",
+    "وزارة الاعمار",
+    "وزارة التخطيط",
+    "وزارة الزراعة",
+    "وزارة التجارة",
+    "وزارة الاتصالات",
+    "وزارة الثقافة",
+    "وزارة الشباب",
+    "وزارة النقل",
+    "وزارة الموارد المائية",
+    "وزارة الهجرة",
+    "وزارة الصناعة",
+    "ministry of oil",
+    "ministry of education",
+    "ministry of health",
+    "ministry of interior",
+    "ministry of defence",
+    "ministry of defense",
+    "ministry of finance",
+)
+HOMEPAGE_PATHS = {
+    "",
+    "/",
+    "/ar",
+    "/arabic",
+    "/en",
+    "/iq",
+    "/home",
+    "/index",
+    "/index.html",
+    "/index.php",
+    "/mihan",
+}
 
 # Strong signals that content is about the ministry / minister / official body
 MINISTRY_POSITIVE = [
@@ -47,49 +116,46 @@ TRUSTED_NEWS_DOMAINS = [
     "rudaw.net",
     "iraqinews.com",
     "almadapaper.net",
+    "baghdad24.news",
+    "mawazin.net",
+    "nasnews.com",
+    "almirbad.com",
+    "alsharqiya.com",
+    "imn.iq",
+    "alforatnews.iq",
+    "kurdistan24.net",
+    "alghadpress.com",
+    "utv.iq",
 ]
 
 OFFICIAL_SEARCH_DOMAINS = MINISTRY_DOMAINS[:5] + TRUSTED_NEWS_DOMAINS[:2]
 
-# Always-try official pages when discovery is thin
-MINISTRY_SEED_PAGES = [
-    {
-        "title": "وزارة العمل والشؤون الاجتماعية",
-        "url": "https://www.molsa.gov.iq/",
-        "snippet": "الموقع الرسمي لوزارة العمل والشؤون الاجتماعية في العراق",
-        "source": "google",
-    },
-    {
-        "title": "الأمانة العامة لمجلس الوزراء",
-        "url": "https://www.cabinet.iq/",
-        "snippet": "قرارات وتصريحات مجلس الوزراء العراقي",
-        "source": "google",
-    },
-    {
-        "title": "المكتب الإعلامي لرئيس الوزراء",
-        "url": "https://pmo.iq/",
-        "snippet": "الموقع الرسمي لمكتب رئيس الوزراء العراقي",
-        "source": "google",
-    },
-    {
-        "title": "وكالة الأنباء العراقية",
-        "url": "https://www.ina.iq/",
-        "snippet": "وكالة الأنباء العراقية — أخبار رسمية",
-        "source": "news",
-    },
-    {
-        "title": "وكالة نينا للأنباء",
-        "url": "https://www.ninanews.com/",
-        "snippet": "وكالة الأنباء العراقية المستقلة",
-        "source": "news",
-    },
-]
-
-ARTICLE_HUBS = [
+# Listing pages crawled for article links — homepages themselves are never kept.
+MINISTRY_LISTING_PAGES = [
+    "https://www.molsa.gov.iq/",
     "https://www.ina.iq/",
     "https://www.ninanews.com/",
     "https://shafaq.com/ar",
+    "https://www.alsumaria.tv/",
+    "https://almadapaper.net/",
+    "https://www.rudaw.net/arabic",
+    "https://baghdad24.news/",
+    "https://www.mawazin.net/",
 ]
+MINISTRY_SEED_PAGES = MINISTRY_LISTING_PAGES
+
+ARTICLE_HUBS = list(MINISTRY_LISTING_PAGES)
+
+CONTACT_FOOTER_MARKERS = (
+    "تواصل مع",
+    "للتواصل",
+    "للاتصال",
+    "البريد الإلكتروني",
+    "عبر الموقع",
+    "contact us",
+    "email:",
+    "info@",
+)
 
 # Platforms that block anonymous HTML — keep snippets only
 SKIP_HTML_HOSTS = [
@@ -179,9 +245,7 @@ _KNOWN_PHRASES = sorted(
 
 
 def _normalize_topic(topic: str) -> str:
-    text = (topic or "").strip().lower()
-    text = text.replace("labor", "labour")
-    return " ".join(text.split())
+    return normalize_arabic(topic)
 
 
 def _strip_known_phrases(topic: str) -> str:
@@ -260,7 +324,13 @@ def build_search_queries(
         if q and q not in queries:
             queries.append(q)
 
-    parts = [part.strip() for part in topic.split(",") if part.strip()]
+    parts: list[str] = []
+    seen_parts: set[str] = set()
+    for part in topic.split(","):
+        cleaned = " ".join(part.split())
+        if cleaned and cleaned not in seen_parts:
+            seen_parts.add(cleaned)
+            parts.append(cleaned)
     joined = " ".join(parts) if parts else topic
     add(joined)
     if len(parts) > 1:
@@ -269,7 +339,8 @@ def build_search_queries(
 
     if is_ministry_topic(joined):
         remainder = _strip_known_phrases(joined)
-        if remainder:
+        weak = remainder.lower() in {"العراقية", "العراقي", "العراق", "iraq", "iraqi"}
+        if remainder and not weak:
             add(f"{remainder} وزارة العمل العراقية")
             add(f"{remainder} Iraqi Ministry of Labour")
             add(f"{remainder} وزارة العمل والشؤون الاجتماعية")
@@ -290,18 +361,41 @@ def build_search_queries(
     return queries[:6]
 
 
-def _google_news_when_suffix(date_from: str | None, date_to: str | None) -> str:
-    """Google News supports when:1d / when:7d / when:30d / when:1y."""
+def date_window_days(date_from: str | None, date_to: str | None) -> int | None:
+    """Inclusive calendar-day span, or None when no range is set."""
     if not date_from and not date_to:
-        return ""
+        return None
     try:
         end = datetime.fromisoformat(date_to) if date_to else datetime.now()
         start = datetime.fromisoformat(date_from) if date_from else end
-        days = max(1, (end.date() - start.date()).days + 1)
+        return max(1, (end.date() - start.date()).days + 1)
     except ValueError:
-        return ""
+        return None
 
-    if days <= 1:
+
+def ddgs_timelimit(date_from: str | None, date_to: str | None) -> str | None:
+    """Map a UI date window onto ddgs timelimit: d / w / m / y."""
+    days = date_window_days(date_from, date_to)
+    if days is None:
+        return None
+    # Yesterday + today is the 24h preset's calendar window.
+    if days <= 2:
+        return "d"
+    if days <= 7:
+        return "w"
+    if days <= 31:
+        return "m"
+    if days <= 365:
+        return "y"
+    return None
+
+
+def google_news_when_suffix(date_from: str | None, date_to: str | None) -> str:
+    """Google News supports when:1d / when:7d / when:30d / when:1y."""
+    days = date_window_days(date_from, date_to)
+    if days is None:
+        return ""
+    if days <= 2:
         return " when:1d"
     if days <= 7:
         return " when:7d"
@@ -310,6 +404,104 @@ def _google_news_when_suffix(date_from: str | None, date_to: str | None) -> str:
     if days <= 365:
         return " when:1y"
     return ""
+
+
+def google_news_when_from_timelimit(timelimit: str | None) -> str:
+    return {
+        "d": " when:1d",
+        "w": " when:7d",
+        "m": " when:30d",
+        "y": " when:1y",
+    }.get((timelimit or "").lower(), "")
+
+
+def _google_news_when_suffix(date_from: str | None, date_to: str | None) -> str:
+    return google_news_when_suffix(date_from, date_to)
+
+
+def agency_query_terms(query: str) -> str:
+    """Shorter unquoted terms Iraqi wires actually use in headlines."""
+    text = (query or "").strip()
+    if not text:
+        return text
+    if is_ministry_topic(text):
+        for short in ("وزارة العمل", "وزير العمل"):
+            if short in text:
+                return short
+        return "وزارة العمل"
+    return text
+
+
+def _headline_text(item: ResearchItem) -> str:
+    """Title plus short snippet only — ignore fetched body/footers."""
+    snippet = (item.description or "")[:220]
+    return f"{item.title or ''} {snippet}"
+
+
+def has_ministry_entity_phrase(text: str) -> bool:
+    return any_normalized_phrase(text, MINISTRY_ENTITY_PHRASES)
+
+
+def title_names_other_ministry(title: str) -> bool:
+    blob = title or ""
+    if has_ministry_entity_phrase(blob):
+        return False
+    return any_normalized_phrase(blob, OTHER_IRAQI_MINISTRIES)
+
+
+def _looks_like_contact_footer(text: str) -> bool:
+    blob = normalize_arabic(text)
+    if not has_ministry_entity_phrase(blob):
+        return False
+    return any(normalize_arabic(marker) in blob for marker in CONTACT_FOOTER_MARKERS)
+
+
+def has_ministry_entity(item: ResearchItem) -> bool:
+    if title_names_other_ministry(item.title or ""):
+        return False
+    source = (item.source or "").lower()
+    if source in SOCIAL_SOURCE_NAMES:
+        return has_ministry_entity_phrase(item.title or "") or has_ministry_entity_phrase(
+            item.description or ""
+        )
+    if has_ministry_entity_phrase(_headline_text(item)):
+        return True
+    body = (item.content or "")[:800]
+    if body and has_ministry_entity_phrase(body) and not _looks_like_contact_footer(body):
+        return True
+    return False
+
+
+def is_trusted_item(item: ResearchItem) -> bool:
+    source = (item.source or "").lower()
+    meta = item.metadata or {}
+    if source in {"agencies", "news", "rss"} or meta.get("agency_id"):
+        return True
+    if source == "telegram" and (meta.get("official") or "molsa2023" in (item.url or "").lower()):
+        return True
+    return is_official_domain(item.url or "") or is_trusted_news_domain(item.url or "")
+
+
+def item_provenance(item: ResearchItem) -> str:
+    source = (item.source or "").lower()
+    meta = item.metadata or {}
+    if source in SOCIAL_SOURCE_NAMES and source != "telegram":
+        return "snippet"
+    if source == "telegram" and not (meta.get("official") or "molsa2023" in (item.url or "").lower()):
+        return "snippet"
+    if is_trusted_item(item) or meta.get("status") == "ok":
+        return "verified"
+    return "indexed"
+
+
+def is_homepage_url(url: str) -> bool:
+    parsed = urlparse(url or "")
+    path = (parsed.path or "/").rstrip("/").lower() or "/"
+    if path == "/" or path in HOMEPAGE_PATHS:
+        return True
+    if path.startswith("/mihan"):
+        return True
+    return False
 
 
 def _haystack(item: ResearchItem) -> str:
@@ -354,62 +546,95 @@ def ministry_relevance_score(item: ResearchItem) -> int:
     if is_foreign_labour(item.title or "", item.content or item.description or "", item.url or ""):
         return -20
 
-    text = _haystack(item)
+    text = normalize_arabic(_haystack(item))
     score = 0
 
     for signal in MINISTRY_POSITIVE:
-        if signal.lower() in text:
+        if normalize_arabic(signal) in text:
             score += 3 + min(len(signal) // 10, 5)
 
+    named = has_ministry_entity(item)
     domain = _domain(item.url or "")
-    for d in MINISTRY_DOMAINS:
-        if domain == d or domain.endswith("." + d):
-            score += 8
-    for d in TRUSTED_NEWS_DOMAINS:
-        if domain == d or domain.endswith("." + d):
-            score += 5
+    if named:
+        for d in MINISTRY_DOMAINS:
+            if domain == d or domain.endswith("." + d):
+                score += 8
+        for d in TRUSTED_NEWS_DOMAINS:
+            if domain == d or domain.endswith("." + d):
+                score += 5
 
-    title = (item.title or "").lower()
-    if "وزارة العمل" in title or "ministry of labour" in title or "ministry of labor" in title:
+    title = normalize_arabic(item.title or "")
+    if any_normalized_phrase(title, ("وزارة العمل", "ministry of labour", "ministry of labor")):
         score += 10
-    if "وزير العمل" in title or "minister of labour" in title or "minister of labor" in title:
+    if any_normalized_phrase(title, ("وزير العمل", "minister of labour", "minister of labor")):
         score += 8
 
     if score < 6:
         for noise in GENERIC_LABOUR_NOISE:
-            if noise.lower() in text:
+            if normalize_arabic(noise) in text:
                 score -= 4
 
     return score
 
 
-def filter_ministry_results(results: list[ResearchItem], topic: str) -> list[ResearchItem]:
-    """Keep / rank results about the ministry when the topic is ministry-focused."""
+def _is_agency_or_trusted(item: ResearchItem) -> bool:
+    source = (item.source or "").lower()
+    meta = item.metadata or {}
+    if source in {"agencies", "news", "rss"} or meta.get("agency_id"):
+        return True
+    return is_trusted_news_domain(item.url or "")
+
+
+def _blended_sort_key(item: ResearchItem, semantic: float) -> float:
+    return ministry_relevance_score(item) + 10.0 * semantic
+
+
+def filter_ministry_results(
+    results: list[ResearchItem],
+    topic: str,
+    semantic: list[float] | None = None,
+) -> list[ResearchItem]:
+    """Keep items that actually name the Iraqi ministry/minister entity."""
     if not is_ministry_topic(topic):
         return results
 
-    social_sources = {"facebook", "instagram", "linkedin", "x", "tiktok", "reddit", "telegram"}
-    scored: list[tuple[int, ResearchItem]] = []
+    candidates: list[ResearchItem] = []
     for item in results:
-        score = ministry_relevance_score(item)
-        # Keep social posts/threads more generously — RFD wants public social content
-        if (item.source or "").lower() in social_sources and score >= 0:
-            score = max(score, 4)
-        scored.append((score, item))
+        if is_homepage_url(item.url or ""):
+            continue
+        if not has_ministry_entity(item):
+            continue
+        if ministry_relevance_score(item) <= 0:
+            continue
+        candidates.append(item)
 
-    strong = [item for score, item in scored if score >= 6]
-    social_keep = [
-        item
-        for score, item in scored
-        if score >= 3 and (item.source or "").lower() in social_sources
-    ]
-    merged = {id(i): i for i in strong + social_keep}
-    if len(merged) >= 3:
-        return sorted(
-            merged.values(),
-            key=lambda i: ministry_relevance_score(i),
-            reverse=True,
-        )
+    if not candidates:
+        return []
 
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [item for score, item in scored if score > 0]
+    from services.semantic import similarity_scores
+
+    if semantic is not None and len(semantic) == len(results):
+        by_original = {id(item): score for item, score in zip(results, semantic)}
+        sims = [by_original.get(id(item), 0.0) for item in candidates]
+    else:
+        sims = similarity_scores(topic, candidates)
+    model_live = any(score > 0 for score in sims)
+    sim_by_id = {id(item): cosine for item, cosine in zip(candidates, sims)}
+    kept: list[ResearchItem] = []
+    for item in candidates:
+        cosine = sim_by_id.get(id(item), 0.0)
+        item.metadata["semantic_score"] = cosine
+        title_hit = has_ministry_entity_phrase(item.title or "")
+        trusted = is_trusted_item(item)
+        if trusted:
+            kept.append(item)
+            continue
+        if model_live and cosine < SEMANTIC_KEEP_MIN and not title_hit:
+            continue
+        kept.append(item)
+
+    kept.sort(
+        key=lambda item: _blended_sort_key(item, sim_by_id.get(id(item), 0.0)),
+        reverse=True,
+    )
+    return kept[:MINISTRY_RESULT_CAP]

@@ -49,7 +49,7 @@ class BaseConnector:
             )
         return cls._client
 
-    async def search(self, query: str) -> list[dict]:
+    async def search(self, query: str, timelimit: str | None = None) -> list[dict]:
         raise NotImplementedError
 
     async def fetch(self, item: dict) -> ResearchItem:
@@ -142,7 +142,7 @@ class PublicWebSearchConnector(BaseConnector):
     platform_label: str = "web"
     allowed_domains: list[str] = []
 
-    async def search(self, query: str) -> list[dict]:
+    async def search(self, query: str, timelimit: str | None = None) -> list[dict]:
         search_query = f"site:{self.site} {query}" if self.site else query
         domains = self._domains()
         results = await ddgs_text(
@@ -152,20 +152,11 @@ class PublicWebSearchConnector(BaseConnector):
             allowed_domains=domains or None,
             region="xa-ar",
             backend="auto",
+            timelimit=timelimit,
             timeout=8.0,
         )
-        if not results:
-            results = await ddgs_text(
-                search_query,
-                source=self.name,
-                max_results=10,
-                allowed_domains=domains or None,
-                region="xa-ar",
-                backend="auto",
-                timeout=8.0,
-            )
         if not results and not self.site:
-            results = await self._google_news_search(search_query)
+            results = await self._google_news_search(search_query, timelimit=timelimit)
         for item in results:
             item["source"] = self.name
         return results
@@ -234,8 +225,13 @@ class PublicWebSearchConnector(BaseConnector):
             timeout=8.0,
         )
 
-    async def _google_news_search(self, query: str, limit: int = 10) -> list[dict]:
+    async def _google_news_search(
+        self, query: str, limit: int = 10, timelimit: str | None = None
+    ) -> list[dict]:
         """Reliable keyless news/web result source (Arabic Iraq + English)."""
+        from services.focus import google_news_when_from_timelimit
+
+        news_query = f"{query}{google_news_when_from_timelimit(timelimit)}"
         results: list[dict] = []
         locales = [
             ("ar", "IQ", "IQ:ar"),
@@ -248,7 +244,7 @@ class PublicWebSearchConnector(BaseConnector):
             try:
                 url = (
                     "https://news.google.com/rss/search?"
-                    f"q={quote_plus(query)}&hl={hl}&gl={gl}&ceid={ceid}"
+                    f"q={quote_plus(news_query)}&hl={hl}&gl={gl}&ceid={ceid}"
                 )
                 response = await client.get(
                     url,
@@ -269,6 +265,10 @@ class PublicWebSearchConnector(BaseConnector):
                             published = parsedate_to_datetime(entry.published).replace(tzinfo=None)
                         except Exception:
                             published = None
+                    source_title = ""
+                    src = getattr(entry, "source", None)
+                    if src is not None:
+                        source_title = getattr(src, "title", "") or str(src)
                     results.append(
                         {
                             "title": getattr(entry, "title", "") or "Untitled",
@@ -278,6 +278,7 @@ class PublicWebSearchConnector(BaseConnector):
                             ).get_text(" ", strip=True)[:220],
                             "source": self.name,
                             "published_date": published,
+                            "source_title": source_title,
                         }
                     )
                     if len(results) >= limit:
@@ -286,5 +287,11 @@ class PublicWebSearchConnector(BaseConnector):
                 self.log_error(f"Google News RSS search failed ({hl})", exc)
 
         if not results:
-            results = await ddgs_news(query, source=self.name, max_results=limit, region="xa-ar")
+            results = await ddgs_news(
+                query,
+                source=self.name,
+                max_results=limit,
+                region="xa-ar",
+                timelimit=timelimit,
+            )
         return results

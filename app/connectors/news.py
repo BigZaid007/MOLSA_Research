@@ -12,17 +12,18 @@ class NewsConnector(PublicWebSearchConnector):
     platform_label = "News"
     content_type = ContentType.NEWS
 
-    async def search(self, query: str) -> list[dict]:
+    async def search(self, query: str, timelimit: str | None = None) -> list[dict]:
+        news_task = self._google_news_search(query, limit=10, timelimit=timelimit)
         site_clause = " OR ".join(f"site:{domain}" for domain in OFFICIAL_SEARCH_DOMAINS)
         official_task = ddgs_text(
             f"{query} ({site_clause})",
             source=self.name,
             max_results=6,
             region="xa-ar",
+            timelimit=timelimit,
             timeout=8.0,
         )
-        news_task = self._google_news_search(query, limit=10)
-        official, news = await asyncio.gather(official_task, news_task, return_exceptions=True)
+        news, official = await asyncio.gather(news_task, official_task, return_exceptions=True)
         if isinstance(official, Exception):
             official = []
         if isinstance(news, Exception):
@@ -30,7 +31,7 @@ class NewsConnector(PublicWebSearchConnector):
 
         results: list[dict] = []
         seen: set[str] = set()
-        for item in list(official or []) + list(news or []):
+        for item in list(news or []) + list(official or []):
             url = item.get("url") or ""
             if not url or url in seen:
                 continue
@@ -45,7 +46,7 @@ class NewsConnector(PublicWebSearchConnector):
                 source=self.name,
                 max_results=10,
                 region="xa-ar",
-                timelimit="m",
+                timelimit=timelimit or "m",
             )
             for item in extra:
                 url = item.get("url") or ""

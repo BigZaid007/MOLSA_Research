@@ -1,7 +1,8 @@
-"""Article extraction adapted from Trafilatura, Readability, and Newspaper4k."""
+"""Article extraction adapted from Trafilatura, news-please (JSON-LD), Readability, and Newspaper4k."""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime
@@ -40,6 +41,8 @@ def extract_from_html(html: str, url: str = "") -> dict[str, Any]:
         return {}
 
     result = _extract_trafilatura(html, url)
+    result = _merge(result, _extract_jsonld(html))
+    result = _merge(result, _extract_opengraph(html))
     if _is_rich(result):
         return result
 
@@ -80,6 +83,14 @@ def _extract_trafilatura(html: str, url: str) -> dict[str, Any]:
             favor_precision=True,
             output_format="txt",
         )
+        if not (text or "").strip():
+            text = trafilatura.extract(
+                html,
+                url=url or None,
+                include_comments=False,
+                favor_recall=True,
+                output_format="txt",
+            )
         meta = trafilatura.extract_metadata(html, default_url=url or None)
         title = _meta_value(meta, "title") or _html_title(html)
         author = _meta_value(meta, "author")
@@ -139,6 +150,92 @@ def _extract_newspaper(html: str, url: str) -> dict[str, Any]:
         }
     except Exception as exc:
         logger.debug("Newspaper failed for %s: %s", url, exc)
+        return {}
+
+
+def _walk_jsonld(node: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    if isinstance(node, list):
+        for item in node:
+            found.extend(_walk_jsonld(item))
+        return found
+    if not isinstance(node, dict):
+        return found
+    types = node.get("@type")
+    labels = types if isinstance(types, list) else [types]
+    labels = [str(label or "").lower() for label in labels]
+    if any(label in {"newsarticle", "article", "reportage", "blogposting"} for label in labels):
+        found.append(node)
+    if "@graph" in node:
+        found.extend(_walk_jsonld(node.get("@graph")))
+    return found
+
+
+def _jsonld_author(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return str(value.get("name") or "")
+    if isinstance(value, list) and value:
+        return _jsonld_author(value[0])
+    return ""
+
+
+def _extract_jsonld(html: str) -> dict[str, Any]:
+    """news-please style NewsArticle JSON-LD."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        for script in soup.find_all("script", attrs={"type": re.compile("ld\\+json", re.I)}):
+            raw = script.string or script.get_text() or ""
+            if not raw.strip():
+                continue
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            for node in _walk_jsonld(data):
+                body = node.get("articleBody") or node.get("description") or ""
+                title = node.get("headline") or node.get("name") or ""
+                image = node.get("image")
+                if isinstance(image, dict):
+                    image = image.get("url")
+                elif isinstance(image, list) and image:
+                    image = image[0].get("url") if isinstance(image[0], dict) else image[0]
+                return {
+                    "title": str(title or "").strip(),
+                    "content": " ".join(str(body).split()),
+                    "meta": {
+                        "author": _jsonld_author(node.get("author")),
+                        "date": node.get("datePublished") or node.get("dateCreated"),
+                        "image": image,
+                    },
+                }
+    except Exception as exc:
+        logger.debug("JSON-LD extract failed: %s", exc)
+    return {}
+
+
+def _extract_opengraph(html: str) -> dict[str, Any]:
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+
+        def prop(name: str) -> str:
+            tag = soup.find("meta", attrs={"property": name}) or soup.find("meta", attrs={"name": name})
+            return (tag.get("content") or "").strip() if tag else ""
+
+        title = prop("og:title") or prop("twitter:title")
+        description = prop("og:description") or prop("twitter:description")
+        return {
+            "title": title,
+            "content": description,
+            "meta": {
+                "date": prop("article:published_time") or prop("og:updated_time"),
+                "image": prop("og:image"),
+                "sitename": prop("og:site_name"),
+            },
+        }
+    except Exception as exc:
+        logger.debug("OpenGraph extract failed: %s", exc)
         return {}
 
 

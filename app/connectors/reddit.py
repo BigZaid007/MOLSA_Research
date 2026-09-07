@@ -25,7 +25,7 @@ class RedditConnector(SocialConnector):
         'site:{site} "وزارة العمل"',
     ]
 
-    async def search(self, query: str) -> list[dict]:
+    async def search(self, query: str, timelimit: str | None = None) -> list[dict]:
         results: list[dict] = []
         seen: set[str] = set()
 
@@ -50,7 +50,7 @@ class RedditConnector(SocialConnector):
                     break
 
         # 3) ddgs site:reddit.com for more threads / mentions
-        web_results = await super().search(query)
+        web_results = await super().search(query, timelimit=timelimit)
         for item in web_results:
             url = item.get("url") or ""
             if not url or url in seen:
@@ -67,6 +67,7 @@ class RedditConnector(SocialConnector):
                 max_results=10,
                 allowed_domains=["reddit.com"],
                 region="wt-wt",
+                timelimit=timelimit,
             )
             for item in fallback:
                 item["content_type"] = ContentType.FORUM.value

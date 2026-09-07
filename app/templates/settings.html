@@ -109,7 +109,7 @@ function settingsApp() {
             max_concurrent_requests: 20,
             auto_save: 'true',
             sources: {
-                google: true, bing: true, rss: true, news: true, reddit: true,
+                google: true, bing: true, rss: true, news: true, agencies: true, reddit: true,
                 facebook: true, instagram: true, linkedin: true, x: true, tiktok: true, telegram: true
             },
             timeout: 30,
@@ -122,6 +122,7 @@ function settingsApp() {
             { key: 'google', label: 'Google', hint: I18N.settings.sourceGoogle },
             { key: 'bing', label: 'Bing', hint: I18N.settings.sourceBing },
             { key: 'news', label: 'News', hint: I18N.settings.sourceNews },
+            { key: 'agencies', label: I18N.home.tabAgencies || 'News agencies', hint: I18N.settings.sourceAgencies },
             { key: 'rss', label: 'RSS', hint: I18N.settings.sourceRss },
             { key: 'reddit', label: 'Reddit', hint: I18N.settings.sourceReddit },
             { key: 'facebook', label: 'Facebook', hint: I18N.settings.sourceFacebook },
